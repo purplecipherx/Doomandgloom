@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION=1
+SCHEMA_VERSION=2
 
 SCHEMA=r"""
 PRAGMA foreign_keys=ON;
@@ -118,6 +118,26 @@ CREATE TABLE IF NOT EXISTS voice_match_candidates(
   review_notes TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_voice_match_score ON voice_match_candidates(cosine_similarity DESC);
+
+CREATE TABLE IF NOT EXISTS voice_exemplars(
+  exemplar_id TEXT PRIMARY KEY,
+  cluster_observation_id TEXT NOT NULL REFERENCES acoustic_clusters(cluster_observation_id) ON DELETE CASCADE,
+  canonical_voice_id TEXT REFERENCES canonical_speakers(canonical_voice_id),
+  source_audio_sha256 TEXT,
+  source_path TEXT NOT NULL,
+  source_start REAL NOT NULL,
+  source_end REAL NOT NULL,
+  duration_seconds REAL NOT NULL,
+  clip_path TEXT NOT NULL,
+  clip_sha256 TEXT NOT NULL,
+  codec TEXT,
+  sample_rate INTEGER,
+  quality_score REAL,
+  verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exemplar_cluster ON voice_exemplars(cluster_observation_id);
+CREATE INDEX IF NOT EXISTS idx_exemplar_voice ON voice_exemplars(canonical_voice_id);
 
 CREATE TABLE IF NOT EXISTS reference_clips(
   reference_id TEXT PRIMARY KEY,
@@ -283,6 +303,84 @@ def ingest_moji(conn,moji:Path,channel_id=""):
     conn.commit()
     return n
 
+
+def extract_clip(source:Path,start:float,end:float,target:Path,sample_rate=16000):
+    target.parent.mkdir(parents=True,exist_ok=True)
+    duration=max(0.05,float(end)-float(start))
+    cmd=[
+        "ffmpeg","-hide_banner","-loglevel","error","-y",
+        "-ss",f"{max(0.0,float(start)):.6f}","-i",str(source),
+        "-t",f"{duration:.6f}","-vn","-ac","1","-ar",str(sample_rate),
+        "-c:a","flac",str(target)
+    ]
+    cp=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    if cp.returncode:
+        raise RuntimeError(cp.stderr.strip() or f"ffmpeg exemplar extraction failed: {source}")
+    return target
+
+def extract_exemplars(conn,moji:Path,vault_root:Path,per_local_speaker=8,min_sec=2.0,max_sec=10.0):
+    import subprocess
+    manifest=moji/"manifests"/"global_clusters.json"
+    db=moji/"voice_harvester.sqlite"
+    if not manifest.exists() or not db.exists():
+        raise SystemExit(f"Missing Moji cluster manifest/database under {moji}")
+    clusters=json.loads(manifest.read_text(encoding="utf-8"))
+    mc=sqlite3.connect(db); mc.row_factory=sqlite3.Row
+    sha_by_path=source_sha_lookup(conn)
+    created=now(); count=0
+    for c in clusters:
+        pid=clean(c.get("id"))
+        row=conn.execute(
+            "SELECT cluster_observation_id FROM acoustic_clusters WHERE moji_output_path=? AND pipeline_cluster_id=? ORDER BY created_at DESC LIMIT 1",
+            (str(moji.resolve()),pid)
+        ).fetchone()
+        if not row: continue
+        obs=row["cluster_observation_id"]
+        for m in c.get("members") or []:
+            file_id=m.get("file_id"); local=clean(m.get("local_speaker"))
+            sf=mc.execute("SELECT path FROM source_files WHERE id=?",(file_id,)).fetchone()
+            if not sf: continue
+            source=Path(sf["path"]).resolve()
+            segs=mc.execute(
+                """SELECT start,end,duration FROM segments
+                   WHERE file_id=? AND local_speaker=? AND overlap=0 AND duration>=?
+                   ORDER BY duration DESC,start ASC""",
+                (file_id,local,float(min_sec))
+            ).fetchall()
+            used=0
+            for seg in segs:
+                if used>=int(per_local_speaker): break
+                start=float(seg["start"]); end=float(seg["end"])
+                if end-start>float(max_sec):
+                    mid=(start+end)/2.0
+                    start=max(0.0,mid-float(max_sec)/2.0)
+                    end=start+float(max_sec)
+                key=stable("VX_",obs,str(file_id),local,f"{start:.6f}",f"{end:.6f}")
+                target=vault_root/"exemplars"/obs[:6]/obs/f"{key}.flac"
+                if not target.exists():
+                    extract_clip(source,start,end,target,16000)
+                clip_sha=sha256_file(target)
+                digest=sha_by_path.get(str(source),"")
+                duration=end-start
+                quality=min(1.0,max(0.0,duration/8.0))
+                binding=conn.execute(
+                    "SELECT canonical_voice_id,binding_status FROM speaker_bindings WHERE cluster_observation_id=?",
+                    (obs,)
+                ).fetchone()
+                conn.execute(
+                    """INSERT OR REPLACE INTO voice_exemplars(
+                       exemplar_id,cluster_observation_id,canonical_voice_id,source_audio_sha256,source_path,
+                       source_start,source_end,duration_seconds,clip_path,clip_sha256,codec,sample_rate,
+                       quality_score,verification_status,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (key,obs,binding["canonical_voice_id"] if binding else None,digest,str(source),
+                     start,end,duration,str(target),clip_sha,"flac",16000,quality,
+                     "BOUND_UNVERIFIED" if binding else "UNVERIFIED",created)
+                )
+                count+=1; used+=1
+    mc.close(); conn.commit()
+    return count
+
 def build_candidates(conn,min_similarity=0.58):
     rows=conn.execute("SELECT * FROM acoustic_clusters ORDER BY created_at,cluster_observation_id").fetchall()
     data=[]
@@ -381,6 +479,7 @@ def main():
     s=sub.add_parser("init")
     s=sub.add_parser("ingest-audio"); s.add_argument("--manifest",required=True); s.add_argument("--vault",default="research/audio_vault"); s.add_argument("--channel-id",default="")
     s=sub.add_parser("ingest-moji"); s.add_argument("--moji-output",required=True); s.add_argument("--channel-id",default="")
+    s=sub.add_parser("extract-exemplars"); s.add_argument("--moji-output",required=True); s.add_argument("--vault",default="research/audio_vault"); s.add_argument("--per-local-speaker",type=int,default=8); s.add_argument("--min-sec",type=float,default=2.0); s.add_argument("--max-sec",type=float,default=10.0)
     s=sub.add_parser("match"); s.add_argument("--min-similarity",type=float,default=0.58)
     s=sub.add_parser("new-voice"); s.add_argument("--display-name",default=""); s.add_argument("--entity-id",default=""); s.add_argument("--status",default="UNKNOWN"); s.add_argument("--confidence",type=float); s.add_argument("--notes",default="")
     s=sub.add_parser("bind"); s.add_argument("--cluster",required=True); s.add_argument("--voice",required=True); s.add_argument("--status",default="POSSIBLE"); s.add_argument("--confidence",type=float,default=0.0); s.add_argument("--evidence-json",default="{}"); s.add_argument("--bound-by",default="")
@@ -399,6 +498,8 @@ def main():
         print(json.dumps({"audio_assets_ingested":ingest_audio_manifest(conn,manifest,vault,args.channel_id)},indent=2)); return 0
     if args.cmd=="ingest-moji":
         print(json.dumps({"clusters_ingested":ingest_moji(conn,Path(args.moji_output).resolve(),args.channel_id)},indent=2)); return 0
+    if args.cmd=="extract-exemplars":
+        print(json.dumps({"voice_exemplars":extract_exemplars(conn,Path(args.moji_output).resolve(),(repo/args.vault).resolve(),args.per_local_speaker,args.min_sec,args.max_sec)},indent=2)); return 0
     if args.cmd=="match":
         print(json.dumps({"match_candidates":build_candidates(conn,args.min_similarity)},indent=2)); return 0
     if args.cmd=="new-voice":
@@ -411,7 +512,7 @@ def main():
         print(json.dumps({"rows":export_resolution(conn,(repo/args.output).resolve())},indent=2)); return 0
     if args.cmd=="stats":
         stats={}
-        for table in ["audio_assets","acoustic_clusters","canonical_speakers","speaker_bindings","identity_evidence","voice_match_candidates","reference_clips"]:
+        for table in ["audio_assets","acoustic_clusters","canonical_speakers","speaker_bindings","identity_evidence","voice_match_candidates","voice_exemplars","reference_clips"]:
             stats[table]=conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         stats["open_match_candidates"]=conn.execute("SELECT COUNT(*) FROM voice_match_candidates WHERE status='OPEN'").fetchone()[0]
         print(json.dumps(stats,indent=2)); return 0
