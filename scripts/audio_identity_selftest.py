@@ -76,6 +76,7 @@ def main():
             "acoustic_score":h["acoustic_score"],
             "combined_score":h["combined_score"],
         },indent=2))
+        conn.close()
     return 0
 
 if __name__=="__main__":
