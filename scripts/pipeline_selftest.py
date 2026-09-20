@@ -22,6 +22,7 @@ def main():
         stats=db.stats()
         assert stats["lanes"]["cpu"]["done"]==1
         print(json.dumps({"ok":True,"stats":stats},indent=2))
+        db.close()
     return 0
 
 if __name__=="__main__":
