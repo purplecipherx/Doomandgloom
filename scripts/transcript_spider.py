@@ -31,7 +31,7 @@ PERSON_CUE_RE = re.compile(
 ENTITY_CUE_RE = re.compile(
     r"\b(?P<kind>podcast|channel|website|company|organization|organisation|foundation|institute|"
     r"book|report|film|documentary|conference|summit|project|platform|service|sponsor)\s+"
-    r"(?:(?:called|named|titled|known\s+as)\s+)?"
+    r"(?:(?P<intro>called|named|titled|known\s+as)\s+)?"
     r"(?P<name>[A-Za-z0-9&’'\.-]+(?:\s+[A-Za-z0-9&’'\.-]+){0,5})",
     re.I,
 )
@@ -52,6 +52,7 @@ BAD_SINGLE = STOP | {
 
 BAD_CUE_START = STOP | {
     "someone","somebody","something","people","person","thing","things","way","kind","lot","number","new","same",
+    "in","on","at","to","from","about","into","over","under","near","around","through","taking","place","based",
 }
 
 CUE_STOP = {
@@ -270,10 +271,15 @@ def _trim_cue_name(raw, max_words=5):
         return ""
     kept = []
     for w in words[:max_words]:
+        had_sentence_end = bool(re.search(r"[.!?]$", w))
         lw = w.lower().strip(".,;:!?()[]{}\"'").replace("’", "'")
         if kept and lw in CUE_STOP:
             break
-        kept.append(w)
+        cleaned_word = w.strip(".,;:!?()[]{}\"'")
+        if cleaned_word:
+            kept.append(cleaned_word)
+        if had_sentence_end:
+            break
     while kept and kept[-1].lower().strip(".,;:!?()[]{}\"'").replace("’", "'") in STOP:
         kept.pop()
     if not kept:
@@ -369,14 +375,20 @@ def extract_mentions(text, known):
         raw = _trim_cue_name(m.group("name"), max_words=5)
         if not raw:
             continue
-        # Bare generic verb-object phrases are rejected unless the extracted name
-        # has at least two meaningful tokens or visible proper-name capitalization.
         words = raw.split()
-        visible_proper = any(w[:1].isupper() for w in words)
-        if len(words) < 2 and not visible_proper:
+        intro = bool(m.group("intro"))
+        visible_proper = any(_token_is_proper(w) and w.lower() not in CONNECTOR_WORDS for w in words)
+        url_like = bool(URL_RE.fullmatch(raw))
+        # Generic noun-following text ("website in Arizona", "book on X",
+        # "conference taking place...") is not a named entity. Lowercase names are
+        # still accepted after an explicit naming construction such as "called".
+        if not (intro or visible_proper or url_like):
+            continue
+        if len(words) < 2 and not (intro or visible_proper or url_like):
             continue
         kind = m.group("kind").lower()
-        add(raw, kind_type.get(kind, "named_entity"), m.start("name"), m.start("name") + len(raw), "", "cue_entity")
+        signal = "cue_entity_named" if intro else "cue_entity"
+        add(raw, kind_type.get(kind, "named_entity"), m.start("name"), m.start("name") + len(raw), "", signal)
 
     return out
 
