@@ -1,0 +1,1 @@
+edge_event_id,source_node_id,target_node_id,predicate,layer,polarity,direction,topic_or_claim_id,source_unit_id,source_id,observed_at,event_date,verification_status,evidence_class,confidence,notes
