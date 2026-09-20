@@ -84,8 +84,8 @@
     "raw_predicate": "Exact or minimally normalized verb/phrase used by the speaker.",
     "predicate_code": "Normalized code from data/ontology/investigative_predicates.csv.",
     "predicate_family": "Copied from ontology.",
-    "source_entity_id": "Resolved speaker/claimant entity when known.",
-    "source_surface": "Speaker/claimant surface form when unresolved.",
+    "source_entity_id": "Semantic actor/claimant/originator of the event. May differ from reporting_entity_id for quotes, paraphrases, hearsay, or attributed claims.",
+    "source_surface": "Unresolved semantic actor/claimant surface when source_entity_id is unknown.",
     "target_entity_id": "Resolved target entity when known.",
     "target_surface": "Target surface form when unresolved.",
     "target_claim_id": "Existing claim node when event targets a claim rather than an entity.",
@@ -108,6 +108,9 @@
     "confidence": "Extraction confidence 0..1.",
     "notes": "Reviewer/model notes.",
     "related_claim_refs": "Local claim IDs emitted in the same unit, e.g. C1/C2, which are deterministically mapped to stable claim IDs.",
-    "related_claim_ids_json": "Stable claim IDs written by the apply step after resolving related_claim_refs."
+    "related_claim_ids_json": "Stable claim IDs written by the apply step after resolving related_claim_refs.",
+    "reporting_entity_id": "Resolved entity physically speaking in the transcript unit; separate from the semantic actor/claimant when reporting or quoting another source.",
+    "reporting_voice_id": "Canonical voice ID for the physical speaker when available.",
+    "actor_resolution_status": "RESOLVED / UNRESOLVED / GROUP_SUMMARY / ANONYMOUS_SOURCE / NOT_APPLICABLE."
   }
 }
