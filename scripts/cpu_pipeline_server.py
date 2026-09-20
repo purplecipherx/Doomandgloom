@@ -78,11 +78,9 @@ def ps(script: Path, pairs, switches=()):
     for sw in switches: cmd += [f"-{sw}"]
     return cmd
 
-def queue_followups(hub, payload, phase):
+def queue_spider(hub, payload, phase):
     cid=payload["channel_id"]; gen=payload["generation"]
-    base=dict(payload)
-    enqueue(hub,kind="analysis_sync",lane="cpu",payload=base,job_key=f"analysis:{phase}:{cid}:{gen}",priority=60)
-    enqueue(hub,kind="spider_channel",lane="cpu",payload=base,job_key=f"spider:{phase}:{cid}:{gen}",priority=80)
+    enqueue(hub,kind="spider_channel",lane="cpu",payload=dict(payload),job_key=f"spider:{phase}:{cid}:{gen}",priority=80)
 
 def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
     payload=json.loads(job["payload_json"])
@@ -101,8 +99,9 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         with HARVEST_SEM:
             code=run_logged(ps(runner,pairs),logs/f"job_{job['id']}_harvest.log",repo)
         if code: raise RuntimeError(f"harvest exit code {code}")
-        queue_followups(hub,payload,"captions")
+        queue_spider(hub,payload,"captions")
         enqueue(hub,kind="prepare_audio",lane="cpu",payload=payload,job_key=f"audio:{payload['channel_id']}:{payload['generation']}",priority=5)
+        enqueue(hub,kind="prepare_voice_audio",lane="cpu",payload=payload,job_key=f"voiceaudio:{payload['channel_id']}:{payload['generation']}",priority=8)
         return {"exit_code":0,"channel_root":str(channel_root)}
 
     if kind=="prepare_audio":
@@ -125,6 +124,96 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         if ready:
             enqueue(hub,kind="gpu_moji_channel",lane="gpu",payload=payload,job_key=f"gpu:{payload['channel_id']}:{payload['generation']}",priority=20,max_attempts=2)
         return {"exit_code":0,"audio_ready":ready}
+
+    if kind=="prepare_voice_audio":
+        caption_status=channel_root/"caption_status.csv"
+        queue_script=repo/"scripts"/"build_voice_index_queue.py"
+        voice_queue=channel_root/"voice_index_queue.csv"
+        code=run_logged([
+            str(ytpy),str(queue_script),str(caption_status),"--output",str(voice_queue)
+        ],logs/f"job_{job['id']}_voice_queue.log",repo)
+        if code:
+            raise RuntimeError(f"voice index queue build exit code {code}")
+
+        voice_audio=channel_root/"voice_audio"
+        downloader=repo/"scripts"/"download_captionless_audio.py"
+        cmd=[str(ytpy),str(downloader),str(voice_queue),"--output-dir",str(voice_audio),
+             "--workers",str(payload.get("audio_workers",audio_workers))]
+        if int(payload.get("voice_index_limit",0) or 0)>0:
+            cmd += ["--limit",str(payload["voice_index_limit"])]
+        with AUDIO_SEM:
+            code=run_logged(cmd,logs/f"job_{job['id']}_voice_audio.log",repo)
+        if code:
+            raise RuntimeError(f"captioned voice audio acquisition exit code {code}")
+
+        manifest=voice_audio/"audio_manifest.jsonl"
+        ready=0
+        if manifest.exists():
+            for line in manifest.read_text(encoding="utf-8",errors="replace").splitlines():
+                try:
+                    r=json.loads(line)
+                    if r.get("status") in ("downloaded","cached") and r.get("audio_path"):
+                        ready+=1
+                except Exception:
+                    pass
+        cid=payload["channel_id"]; gen=payload["generation"]
+        if ready:
+            enqueue(
+                hub,kind="gpu_voice_index_channel",lane="gpu",payload=payload,
+                job_key=f"gpuvoice:{cid}:{gen}",priority=25,max_attempts=2
+            )
+        else:
+            # No captioned media in this harvest; do not block semantic analysis.
+            enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,
+                    job_key=f"analysis:nocaptionvoice:{cid}:{gen}",priority=30)
+        return {"exit_code":0,"voice_audio_ready":ready,"voice_queue":str(voice_queue)}
+
+    if kind=="caption_voice_identity_sync":
+        identity_script=repo/"scripts"/"audio_identity_db.py"
+        audio_manifest=channel_root/"voice_audio"/"audio_manifest.jsonl"
+        moji_out=channel_root/"voice_index_work"
+        resolution=repo/"data"/"audio"/"speaker_resolution_current.csv"
+        matches=repo/"data"/"audio"/"voice_match_candidates.csv"
+        hypotheses=repo/"data"/"audio"/"identity_hypotheses.csv"
+        attribution_out=channel_root/"speaker_attribution"
+        voice_log=logs/f"job_{job['id']}_caption_voice_identity.log"
+
+        with VOICE_LOCK:
+            commands=[
+                [str(ytpy),str(identity_script),"ingest-audio","--manifest",str(audio_manifest),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"ingest-moji","--moji-output",str(moji_out),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"extract-exemplars","--moji-output",str(moji_out)],
+                [str(ytpy),str(identity_script),"match","--min-similarity",str(payload.get("voice_match_floor",0.58))],
+                [str(ytpy),str(identity_script),"export","--output",str(resolution)],
+                [str(ytpy),str(identity_script),"export-matches","--output",str(matches)],
+                [str(ytpy),str(identity_script),"export-hypotheses","--output",str(hypotheses)],
+            ]
+            for cmd in commands:
+                code=run_logged(cmd,voice_log,repo)
+                if code:
+                    raise RuntimeError(f"caption voice identity stage failed exit={code}: {' '.join(cmd)}")
+
+            align=repo/"scripts"/"align_captions_to_speakers.py"
+            code=run_logged([
+                str(ytpy),str(align),
+                "--moji-output",str(moji_out),
+                "--normalized-dir",str(channel_root/"normalized"),
+                "--audio-manifest",str(audio_manifest),
+                "--speaker-resolution",str(resolution),
+                "--channel-id",payload["channel_id"],
+                "--output",str(attribution_out),
+            ],voice_log,repo)
+            if code:
+                raise RuntimeError(f"caption speaker alignment exit code {code}")
+
+        cid=payload["channel_id"]; gen=payload["generation"]
+        enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,
+                job_key=f"analysis:captionvoice:{cid}:{gen}",priority=30)
+        return {
+            "exit_code":0,
+            "speaker_resolution":str(resolution),
+            "caption_attribution":str(attribution_out/"caption_speaker_attribution.csv"),
+        }
 
     if kind=="audio_identity_sync":
         identity_script=repo/"scripts"/"audio_identity_db.py"
@@ -198,7 +287,7 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
 
 def worker_loop(index, args, repo, state):
     worker=f"{socket.gethostname()}-cpu-{index}"
-    kinds=["harvest_channel","prepare_audio","audio_identity_sync","analysis_sync","spider_channel"]
+    kinds=["harvest_channel","prepare_audio","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
     while True:
         try:
             job=lease(args.hub,lane="cpu",worker=worker,kinds=kinds,lease_seconds=args.lease_seconds)
