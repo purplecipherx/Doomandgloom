@@ -1,5 +1,6 @@
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$RecoverActive
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,8 +14,8 @@ $state = Get-Content $statePath -Raw | ConvertFrom-Json
 $gpuUrl=[string]$state.gpu.url
 try {
     $status=Invoke-RestMethod -Uri ($gpuUrl + "/status") -TimeoutSec 3
-    if ($status.active -and -not $Force) {
-        throw ("GPU job is active: " + $status.active.job_key + ". Let it finish, or use -Force only if you intentionally want to interrupt it.")
+    if ($status.active -and -not $Force -and -not $RecoverActive) {
+        throw ("GPU job is active: " + $status.active.job_key + ". Use -RecoverActive to safely requeue it before restart.")
     }
 } catch {
     if ($_.Exception.Message -like "GPU job is active:*") { throw }
@@ -31,6 +32,13 @@ if ($gpuPid -gt 0) {
         Stop-Process -Id $gpuPid -Force
         Start-Sleep -Milliseconds 800
     }
+}
+
+if ($RecoverActive) {
+    Write-Host "Recovering leased GPU jobs..."
+    $repoPython = Join-Path $repoRoot ".venv-youtube\Scripts\python.exe"
+    & $repoPython (Join-Path $PSScriptRoot "recover_gpu_queue.py") --db (Join-Path $repoRoot "research\runtime\pipeline_jobs.sqlite")
+    if ($LASTEXITCODE -ne 0) { throw "GPU queue recovery failed." }
 }
 
 $mojiPython=[string]$state.gpu.python
