@@ -3,10 +3,11 @@ param(
     [string]$Url,
     [string]$Name = "",
     [string]$Output = "research/youtube",
-    [int]$Workers = 2,
+    [int]$Workers = 8,
     [double]$Sleep = 0.75,
     [int]$Limit = 0,
     [int]$CaptionlessLimit = 0,
+    [int]$AudioWorkers = 4,
     [switch]$InventoryOnly,
     [switch]$ProcessCaptionless,
     [string]$MojiRoot = "",
@@ -94,7 +95,7 @@ if (-not $MojiRoot) {
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
 $audioScript = Join-Path $PSScriptRoot "download_captionless_audio.py"
-$audioArgs = @($audioScript, $queue)
+$audioArgs = @($audioScript, $queue, "--workers", "$AudioWorkers")
 if ($CaptionlessLimit -gt 0) { $audioArgs += @("--limit", "$CaptionlessLimit") }
 & $harvestPython @audioArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
