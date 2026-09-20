@@ -13,17 +13,50 @@ from pathlib import Path
 CAPTION_SEG_SUFFIX = ".segments.jsonl"
 DIARIZED_NAME = "diarized_transcript.jsonl"
 URL_RE = re.compile(r'https?://[^\s<>"\']+|\b(?:www\.)?[A-Za-z0-9.-]+\.(?:com|org|net|io|tv|news|co|us|gov|edu)\b', re.I)
-CAP_RE = re.compile(r"\b(?:[A-Z][A-Za-z0-9&’'\.-]+(?:\s+|$)){1,6}")
-CUE_RE = re.compile(
-    r"\b(?:guest|with|joined by|speaking with|interview(?:ing)?|dr\.?|doctor|professor|mr\.?|mrs\.?|ms\.?|"
-    r"podcast|channel|show|website|company|organization|organisation|foundation|institute|book|report|film|"
-    r"conference|summit|sponsor(?:ed by)?|called|named)\s+"
-    r"([A-Za-z0-9&’'\.-]+(?:\s+[A-Za-z0-9&’'\.-]+){1,6})",
+
+# Proper-name spans. Unknown single-token names are handled conservatively below;
+# multi-token title-case spans are much less likely to be sentence-initial filler.
+CAP_RE = re.compile(
+    r"\b[A-Z][A-Za-z0-9&’'\.-]*"
+    r"(?:\s+(?:(?:[A-Z][A-Za-z0-9&’'\.-]*)|of|the|and|for)){0,5}\b"
+)
+
+PERSON_CUE_RE = re.compile(
+    r"\b(?:guest(?:\s+is)?|joined\s+by|speaking\s+with|interview(?:ing|\s+with)?|"
+    r"dr\.?|doctor|professor|mr\.?|mrs\.?|ms\.?)\s+"
+    r"([A-Za-z0-9&’'\.-]+(?:\s+[A-Za-z0-9&’'\.-]+){0,4})",
     re.I,
 )
+
+ENTITY_CUE_RE = re.compile(
+    r"\b(?P<kind>podcast|channel|website|company|organization|organisation|foundation|institute|"
+    r"book|report|film|documentary|conference|summit|project|platform|service|sponsor)\s+"
+    r"(?:(?:called|named|titled|known\s+as)\s+)?"
+    r"(?P<name>[A-Za-z0-9&’'\.-]+(?:\s+[A-Za-z0-9&’'\.-]+){0,5})",
+    re.I,
+)
+
 STOP = {
-    "the","this","that","there","here","and","but","for","with","from","into","when","what","why","how",
-    "today","yesterday","tomorrow","we","you","they","he","she","it","our","your","their"
+    "a","an","the","this","that","these","those","there","here","and","but","or","so","because","for","with",
+    "from","into","when","what","why","how","who","where","today","yesterday","tomorrow","we","you","they","he",
+    "she","it","i","me","my","our","your","their","his","her","its","is","are","was","were","be","been","being",
+    "have","has","had","do","does","did","can","could","will","would","should","may","might","must","not","no",
+    "yes","yeah","mhm","uh","um","right","okay","ok","well","now","then","just","really","actually","basically",
+    "exactly","absolutely","probably","maybe","anyway","again","all","one","two","three","four","five","look","see",
+    "sure","good","great","wow"
+}
+
+BAD_SINGLE = STOP | {
+    "american","chinese","iranian","russian","british","european","global","local","federal","state","national",
+}
+
+BAD_CUE_START = STOP | {
+    "someone","somebody","something","people","person","thing","things","way","kind","lot","number","new","same",
+}
+
+CUE_STOP = {
+    "because","who","that","which","where","when","if","then","so","but","however","although","though","while",
+    "was","were","is","are","has","have","had","will","would","can","could","should","may","might","must",
 }
 
 def now():
@@ -69,7 +102,7 @@ def triage(canonical, candidate_type, mentions, content_count, speaker_count, si
         score += 100
     if "url" in signals:
         score += 25
-    if "cue" in signals:
+    if any(sig.startswith("cue_") for sig in signals):
         score += 25
     if "proper_case" in signals:
         score += 8
@@ -153,6 +186,27 @@ def read_segments(path: Path, source_type: str):
                 "text": o.get("text", ""),
             }
 
+def _trim_cue_name(raw, max_words=5):
+    words = clean(raw).split()
+    if not words:
+        return ""
+    if words[0].lower().replace("’", "'") in BAD_CUE_START:
+        return ""
+    kept = []
+    for w in words[:max_words]:
+        lw = w.lower().strip(".,;:!?()[]{}\"'").replace("’", "'")
+        if kept and lw in CUE_STOP:
+            break
+        kept.append(w)
+    while kept and kept[-1].lower().strip(".,;:!?()[]{}\"'").replace("’", "'") in STOP:
+        kept.pop()
+    if not kept:
+        return ""
+    # Lowercase auto-caption cue captures need at least two tokens unless the cue
+    # itself is an honorific/person cue (handled separately).
+    return " ".join(kept)
+
+
 def extract_mentions(text, known):
     out = []
     occupied = []
@@ -192,25 +246,61 @@ def extract_mentions(text, known):
     for m in CAP_RE.finditer(text):
         raw = clean(m.group(0))
         words = raw.split()
-        while words and words[0].lower() in STOP:
+        while words and words[0].lower().replace("’", "'") in STOP:
             words = words[1:]
         raw = " ".join(words)
-        if raw:
-            add(raw, None, m.start(), m.end(), "", "proper_case")
+        if not raw:
+            continue
 
-    # Cue-based extraction also works on lowercase auto-captions.
-    for m in CUE_RE.finditer(text):
-        raw = clean(m.group(1))
-        # Stop runaway captures on common sentence/function words.
-        words = raw.split()
-        kept = []
-        for w in words:
-            if len(kept) >= 2 and w.lower() in {"and","but","because","who","that","which","where","when","to","for","with","from","about"}:
-                break
-            kept.append(w)
-        raw = " ".join(kept[:6])
+        if len(words) == 1:
+            token = words[0].strip(".,;:!?()[]{}\"'")
+            low_token = token.lower().replace("’", "'")
+            # Sentence-initial discourse words and common adjectives created most
+            # of the previous false positives. Keep one-token unknowns only when
+            # they look acronym-like/internal-capitalized or occur away from a
+            # likely sentence boundary.
+            acronym_like = token.isupper() and 2 <= len(token) <= 12
+            internal_cap = any(c.isupper() for c in token[1:])
+            prev = text[:m.start()].rstrip()
+            mid_sentence = bool(prev) and prev[-1] not in ".!?\n>"
+            if low_token in BAD_SINGLE:
+                continue
+            if not (acronym_like or internal_cap or mid_sentence):
+                continue
+
+        add(raw, None, m.start(), m.end(), "", "proper_case")
+
+    # Strong person cues. Unlike the old generic "with" rule, these have explicit
+    # introduction/interview/title semantics.
+    for m in PERSON_CUE_RE.finditer(text):
+        raw = _trim_cue_name(m.group(1), max_words=4)
         if raw:
-            add(raw, None, m.start(1), m.start(1) + len(raw), "", "cue")
+            add(raw, "person", m.start(1), m.start(1) + len(raw), "", "cue_person")
+
+    # Typed entity cues. These retain lowercase auto-caption discovery without
+    # treating arbitrary text following "with/show/report" as an entity.
+    kind_type = {
+        "podcast": "media_show", "channel": "media_show",
+        "website": "website", "company": "organization",
+        "organization": "organization", "organisation": "organization",
+        "foundation": "organization", "institute": "organization",
+        "book": "product", "report": "product", "film": "product",
+        "documentary": "product", "conference": "event", "summit": "event",
+        "project": "organization", "platform": "product", "service": "product",
+        "sponsor": "organization",
+    }
+    for m in ENTITY_CUE_RE.finditer(text):
+        raw = _trim_cue_name(m.group("name"), max_words=5)
+        if not raw:
+            continue
+        # Bare generic verb-object phrases are rejected unless the extracted name
+        # has at least two meaningful tokens or visible proper-name capitalization.
+        words = raw.split()
+        visible_proper = any(w[:1].isupper() for w in words)
+        if len(words) < 2 and not visible_proper:
+            continue
+        kind = m.group("kind").lower()
+        add(raw, kind_type.get(kind, "named_entity"), m.start("name"), m.start("name") + len(raw), "", "cue_entity")
 
     return out
 
@@ -237,6 +327,14 @@ def load_master(path: Path):
 
 def all_run_evidence(out: Path):
     for p in (out / "runs").glob("*/mention_evidence.jsonl"):
+        manifest_path = p.parent / "spider_manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if manifest.get("superseded"):
+                    continue
+            except Exception:
+                pass
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line.strip():
                 continue
@@ -367,9 +465,11 @@ def main():
     evidence = []
     co = defaultdict(int)
     processed_at = now()
+    segment_count = 0
 
     for path, source_type, digest in new_files:
         for seg in read_segments(path, source_type):
+            segment_count += 1
             text = seg["text"] or ""
             keys = []
             for key, raw, typ, start, end, canonical, signal in extract_mentions(text, known):
@@ -486,7 +586,7 @@ def main():
         "research_root": str(root),
         "transcript_files_new": len(new_files),
         "transcript_files_skipped_already_processed": len(skipped),
-        "segments_scanned": sum(1 for _ in evidence),
+        "segments_scanned": segment_count,
         "candidate_count_this_batch": len(batch_rows),
         "master_candidate_count": len(master_rows),
         "mention_evidence_rows": len(evidence),
