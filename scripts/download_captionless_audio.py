@@ -155,6 +155,13 @@ def process_one(index: int, row: dict, queue: Path, base: Path):
         except Exception:
             pass
 
+    # Existing normalized audio was not a valid cache hit; remove it before reacquisition.
+    if final_audio.exists():
+        try:
+            final_audio.unlink()
+        except OSError:
+            pass
+
     for p in vdir.glob("*.part"):
         try:
             p.unlink()
