@@ -37,6 +37,22 @@ def main():
     index=load_index(index_path)
 
     rows=list(csv.DictReader(ledger.open(encoding="utf-8-sig")))
+    by_content={}
+    for r in rows:
+        by_content.setdefault(r["content_id"],[]).append(r)
+    for content_rows in by_content.values():
+        def _t(x):
+            try: return float(x.get("start_seconds") or 0)
+            except Exception: return 0.0
+        content_rows.sort(key=lambda x: (_t(x), x.get("unit_id","")))
+    neighbor_map={}
+    for content_rows in by_content.values():
+        for idx,r in enumerate(content_rows):
+            neighbor_map[r["unit_id"]]={
+                "context_before":[x["text"] for x in content_rows[max(0,idx-2):idx]],
+                "context_after":[x["text"] for x in content_rows[idx+1:idx+3]],
+            }
+
     pending=[r for r in rows if r.get("semantic_review_status")!="COMPLETE" and r["unit_id"] not in index]
 
     new_index=[]
@@ -59,6 +75,8 @@ def main():
                     "end_seconds":r["end_seconds"],
                     "speaker_id":r["speaker_id"],
                     "text":r["text"],
+                    "context_before":neighbor_map.get(r["unit_id"],{}).get("context_before",[]),
+                    "context_after":neighbor_map.get(r["unit_id"],{}).get("context_after",[]),
                     "review_required":{
                         "classify_speech_act":True,
                         "extract_all_mentions":True,
