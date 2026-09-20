@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "statuses": [
+    "VERIFIED_TEXT",
+    "NEEDS_REVIEW",
+    "REJECTED_TEXT"
+  ],
+  "error_types": [
+    "WRONG_SPEAKER",
+    "WRONG_TARGET",
+    "WRONG_PREDICATE",
+    "OVERSTATED",
+    "UNDERSTATED",
+    "QUOTE_TO_BELIEF",
+    "HEARSAY_TO_BELIEF",
+    "ALLEGATION_TO_FACT",
+    "NEGATION_INVERSION",
+    "QUESTION_TO_ASSERTION",
+    "HYPOTHETICAL_TO_ASSERTION",
+    "PREDICTION_TO_OBSERVED_EVENT",
+    "MENTION_TO_RELATIONSHIP",
+    "CRITICISM_TO_ASSOCIATION",
+    "RECOMMENDATION_TO_AFFILIATE",
+    "SHARED_TARGET_TO_COORDINATION",
+    "COREFERENCE_GUESSED",
+    "ENTITY_RESOLUTION_ERROR",
+    "TRANSCRIPT_FRAGMENT_ERROR",
+    "MISSING_CONTEXT",
+    "DUPLICATE_EVENT"
+  ],
+  "required": [
+    "semantic_event_id",
+    "status",
+    "reviewer",
+    "reviewed_at"
+  ],
+  "note": "VERIFIED_TEXT means extraction fidelity only; it is not a factual truth verdict."
+}
