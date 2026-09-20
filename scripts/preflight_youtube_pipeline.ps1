@@ -57,7 +57,9 @@ if (Test-Path $ytPython) {
         "cpu_pipeline_server.py",
         "gpu_pipeline_server.py",
         "queue_youtube_corpus.py",
-        "queue_semantic_review.py"
+        "queue_semantic_review.py",
+        "apply_semantic_review.py",
+        "apply_fact_checks.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
