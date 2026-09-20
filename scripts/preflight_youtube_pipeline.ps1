@@ -125,6 +125,23 @@ if ($Mode -eq "full") {
             Fail "Moji dependencies failed to import"
         }
 
+        if ($mojiRoot) {
+            $decodeTest = Join-Path $env:TEMP "doomandgloom_moji_decode_test.wav"
+            & ffmpeg -hide_banner -loglevel error -y -f lavfi -i "sine=frequency=440:duration=1" -ac 1 -ar 16000 $decodeTest
+            if ($LASTEXITCODE -eq 0) {
+                $decodeCode = "import sys; sys.path.insert(0, r'$mojiRoot'); from pathlib import Path; from voice_harvester.audio import load_waveform_ffmpeg, load_waveform_segment_ffmpeg; w,sr=load_waveform_ffmpeg(Path(r'$decodeTest'),16000); ws,srs=load_waveform_segment_ffmpeg(Path(r'$decodeTest'),0.1,0.5,16000); assert sr==16000 and srs==16000 and w.ndim==2 and ws.ndim==2 and w.shape[1]>0 and ws.shape[1]>0; print('decode_samples=' + str(w.shape[1]) + ' segment_samples=' + str(ws.shape[1]))"
+                & $mojiPython -c $decodeCode
+                if ($LASTEXITCODE -eq 0) {
+                    Pass "Moji ffmpeg waveform decoder works (TorchCodec bypass)"
+                } else {
+                    Fail "Moji ffmpeg waveform decoder failed"
+                }
+            } else {
+                Fail "Could not generate preflight audio decode fixture with ffmpeg"
+            }
+            Remove-Item $decodeTest -Force -ErrorAction SilentlyContinue
+        }
+
         & $mojiPython -c "import os; from huggingface_hub import get_token; raise SystemExit(0 if (os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN') or get_token()) else 1)"
         if ($LASTEXITCODE -eq 0) {
             Pass "Hugging Face authentication available (environment or cached login)"
