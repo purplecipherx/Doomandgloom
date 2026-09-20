@@ -136,6 +136,25 @@ def process_one(index: int, row: dict, queue: Path, base: Path):
     vdir.mkdir(parents=True, exist_ok=True)
     outtmpl = str(vdir / "%(id)s.%(ext)s")
 
+    final_audio = vdir / f"{vid}.128k.opus"
+    prior_manifest = vdir / "audio_manifest.json"
+    if final_audio.exists() and prior_manifest.exists():
+        try:
+            prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
+            prior_sha = prior.get("sha256") or ""
+            actual_sha = sha256(final_audio)
+            if prior.get("status") in {"downloaded", "cached"} and prior_sha and prior_sha == actual_sha:
+                rec = dict(prior)
+                rec["status"] = "cached"
+                rec["downloaded_at"] = now()
+                rec["audio_path"] = str(final_audio.relative_to(queue.parent))
+                rec["sha256"] = actual_sha
+                rec["temporary_source_media_retained"] = False
+                rec["_queue_index"] = index
+                return rec
+        except Exception:
+            pass
+
     for p in vdir.glob("*.part"):
         try:
             p.unlink()
@@ -146,6 +165,7 @@ def process_one(index: int, row: dict, queue: Path, base: Path):
     for old_media in list(vdir.iterdir()):
         if (
             old_media.is_file()
+            and old_media.resolve() != final_audio.resolve()
             and not old_media.name.endswith(".info.json")
             and old_media.suffix.lower() not in {".json", ".part", ".ytdl"}
         ):
@@ -304,7 +324,8 @@ def main():
     run_record["completed_at"] = now()
     run_record["status"] = "complete"
     run_record["downloaded_count"] = sum(1 for r in manifest if r["status"] == "downloaded")
-    run_record["failed_count"] = sum(1 for r in manifest if r["status"] != "downloaded")
+    run_record["cached_count"] = sum(1 for r in manifest if r["status"] == "cached")
+    run_record["failed_count"] = sum(1 for r in manifest if r["status"] not in {"downloaded", "cached"})
     run_record["muxed_fallback_count"] = sum(
         1 for r in manifest if r.get("acquisition_mode") == "muxed_video_fallback"
     )
