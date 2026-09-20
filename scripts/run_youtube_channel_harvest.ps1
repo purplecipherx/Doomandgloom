@@ -10,6 +10,7 @@ param(
     [int]$AudioWorkers = 4,
     [switch]$InventoryOnly,
     [switch]$ProcessCaptionless,
+    [switch]$SkipHarvest,
     [string]$MojiRoot = "",
     [ValidateSet("cuda","cpu")]
     [string]$Device = "cuda",
@@ -51,21 +52,31 @@ Write-Host "Name:   $Name"
 Write-Host "Output: $channelOut"
 Write-Host ""
 
-& $harvestPython @argsList
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipHarvest) {
+    & $harvestPython @argsList
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-if ($InventoryOnly) {
-    Write-Host ""
-    Write-Host "Inventory complete. No captions, audio, diarization, or transcription were run."
-    exit 0
-}
+    if ($InventoryOnly) {
+        Write-Host ""
+        Write-Host "Inventory complete. No captions, audio, diarization, or transcription were run."
+        exit 0
+    }
 
-if (-not $ProcessCaptionless) {
-    Write-Host ""
-    Write-Host "Caption harvest complete."
-    Write-Host "Captionless queue: $(Join-Path $channelOut 'needs_transcription.csv')"
-    Write-Host "Rerun with -ProcessCaptionless for audio-only + M0J1M0J1 diarization/transcription."
-    exit 0
+    if (-not $ProcessCaptionless) {
+        Write-Host ""
+        Write-Host "Caption harvest complete."
+        Write-Host "Captionless queue: $(Join-Path $channelOut 'needs_transcription.csv')"
+        Write-Host "Rerun with -ProcessCaptionless for audio-only + M0J1M0J1 diarization/transcription."
+        exit 0
+    }
+} else {
+    Write-Host "Harvest stage: SKIPPED (using existing caption/transcription queue)"
+    if (-not $ProcessCaptionless) {
+        throw "-SkipHarvest requires -ProcessCaptionless."
+    }
+    if (-not (Test-Path (Join-Path $channelOut "needs_transcription.csv"))) {
+        throw "Cannot skip harvest; missing queue: $(Join-Path $channelOut 'needs_transcription.csv')"
+    }
 }
 
 if (-not $MojiRoot) {
