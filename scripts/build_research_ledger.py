@@ -16,7 +16,9 @@ SPACE_RE = re.compile(r"\s+")
 
 FIELDS = [
     "unit_id","content_id","source_type","source_path","source_sha256",
-    "start_seconds","end_seconds","speaker_id","text","unit_index",
+    "start_seconds","end_seconds","speaker_id","raw_speaker_id","acoustic_cluster_id",
+    "canonical_voice_id","resolved_entity_id","speaker_resolution_status",
+    "speaker_resolution_confidence","speaker_display_name","channel_id","text","unit_index",
     "source_status","superseded_at","semantic_review_status","fact_check_status","created_at","last_seen_at"
 ]
 
@@ -78,6 +80,14 @@ def iter_diarized(path: Path):
             "start_seconds": o.get("start_seconds", ""),
             "end_seconds": o.get("end_seconds", ""),
             "speaker_id": o.get("speaker_id", ""),
+            "raw_speaker_id": o.get("raw_speaker_id", o.get("speaker_id", "")),
+            "acoustic_cluster_id": o.get("acoustic_cluster_id", ""),
+            "canonical_voice_id": o.get("canonical_voice_id", ""),
+            "resolved_entity_id": o.get("resolved_entity_id", ""),
+            "speaker_resolution_status": o.get("speaker_resolution_status", ""),
+            "speaker_resolution_confidence": o.get("speaker_resolution_confidence", ""),
+            "speaker_display_name": o.get("speaker_display_name", ""),
+            "channel_id": o.get("channel_id", ""),
             "text": o.get("text", ""),
         }
 
@@ -145,6 +155,14 @@ def main():
                     "start_seconds": start,
                     "end_seconds": end,
                     "speaker_id": seg["speaker_id"],
+                    "raw_speaker_id": seg.get("raw_speaker_id", seg["speaker_id"]),
+                    "acoustic_cluster_id": seg.get("acoustic_cluster_id", ""),
+                    "canonical_voice_id": seg.get("canonical_voice_id", ""),
+                    "resolved_entity_id": seg.get("resolved_entity_id", ""),
+                    "speaker_resolution_status": seg.get("speaker_resolution_status", ""),
+                    "speaker_resolution_confidence": seg.get("speaker_resolution_confidence", ""),
+                    "speaker_display_name": seg.get("speaker_display_name", ""),
+                    "channel_id": seg.get("channel_id", ""),
                     "text": part,
                     "unit_index": idx,
                     "source_status": "CURRENT",
