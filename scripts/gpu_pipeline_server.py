@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import socket
 import subprocess
+import sys
 import threading
 import time
+from argparse import Namespace
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,13 +19,26 @@ from pipeline_client import complete, enqueue, fail, heartbeat, lease
 def now():
     return datetime.now(timezone.utc).isoformat()
 
+def gpu_memory():
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return {"cuda":False}
+        free,total=torch.cuda.mem_get_info()
+        return {
+            "cuda":True,
+            "device":torch.cuda.get_device_name(0),
+            "allocated_bytes":int(torch.cuda.memory_allocated()),
+            "reserved_bytes":int(torch.cuda.memory_reserved()),
+            "free_bytes":int(free),
+            "total_bytes":int(total),
+        }
+    except Exception as e:
+        return {"cuda":False,"error":repr(e)}
+
 class State:
     def __init__(self):
-        self.lock=threading.Lock()
-        self.active=None
-        self.completed=0
-        self.failed=0
-        self.started_at=now()
+        self.lock=threading.Lock(); self.active=None; self.completed=0; self.failed=0; self.started_at=now()
     def set_active(self,job):
         with self.lock:
             self.active={"id":job["id"],"kind":job["kind"],"job_key":job["job_key"],"started_at":now()}
@@ -33,7 +49,10 @@ class State:
             else:self.failed+=1
     def snapshot(self):
         with self.lock:
-            return {"service":"gpu","started_at":self.started_at,"active":self.active,"completed":self.completed,"failed":self.failed,"ts":now()}
+            return {
+                "service":"gpu","started_at":self.started_at,"active":self.active,
+                "completed":self.completed,"failed":self.failed,"gpu_memory":gpu_memory(),"ts":now()
+            }
 
 class StatusAPI(BaseHTTPRequestHandler):
     state=None
@@ -43,11 +62,13 @@ class StatusAPI(BaseHTTPRequestHandler):
             self.send_response(404); self.end_headers(); return
         obj=self.state.snapshot(); obj["ok"]=True
         data=json.dumps(obj).encode("utf-8")
-        self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
+        self.send_response(200); self.send_header("Content-Type","application/json")
+        self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
 
 class HeartbeatThread(threading.Thread):
     def __init__(self,hub,job_id,worker,seconds):
-        super().__init__(daemon=True); self.hub=hub; self.job_id=job_id; self.worker=worker; self.seconds=seconds; self.stop_event=threading.Event()
+        super().__init__(daemon=True); self.hub=hub; self.job_id=job_id; self.worker=worker
+        self.seconds=seconds; self.stop_event=threading.Event()
     def run(self):
         interval=max(20,min(90,self.seconds//3))
         while not self.stop_event.wait(interval):
@@ -55,46 +76,81 @@ class HeartbeatThread(threading.Thread):
             except Exception: pass
     def stop(self): self.stop_event.set()
 
-def ps(script: Path,pairs,switches=()):
-    cmd=["powershell.exe","-ExecutionPolicy","Bypass","-File",str(script)]
-    for k,v in pairs:
-        if v is not None: cmd += [f"-{k}",str(v)]
-    for sw in switches: cmd += [f"-{sw}"]
-    return cmd
+def detect_moji_root(explicit=""):
+    if explicit:
+        p=Path(explicit).resolve()
+        if (p/"voice_harvest.py").exists(): return p
+    home=Path.home()
+    for p in [
+        home/"Desktop"/"M0J1M0J1_VOICE",
+        home/"Desktop"/"M0J1M0J1_GPU",
+        home/"Desktop"/"M0J1M0J1",
+    ]:
+        if (p/"voice_harvest.py").exists(): return p
+    raise RuntimeError("Could not find M0J1M0J1 voice_harvest.py")
 
-def run_logged(cmd,log_path:Path,cwd:Path):
-    log_path.parent.mkdir(parents=True,exist_ok=True)
-    with log_path.open("a",encoding="utf-8",errors="replace") as log:
-        log.write("\n=== "+now()+" ===\n"+" ".join(map(str,cmd))+"\n"); log.flush()
-        cp=subprocess.run(cmd,cwd=str(cwd),stdout=log,stderr=subprocess.STDOUT,text=True)
-    return cp.returncode
+def load_moji(moji_root:Path):
+    root=str(moji_root)
+    if root not in sys.path: sys.path.insert(0,root)
+    from voice_harvester.cli import cmd_scan,cmd_diarize,cmd_embed,cmd_cluster,cmd_extract,cmd_transcribe
+    return cmd_scan,cmd_diarize,cmd_embed,cmd_cluster,cmd_extract,cmd_transcribe
 
-def handle(job,repo:Path,hub:str):
+def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
     p=json.loads(job["payload_json"])
     if job["kind"]!="gpu_moji_channel":
         raise RuntimeError(f"unsupported GPU job kind: {job['kind']}")
-    runner=repo/"scripts"/"run_youtube_channel_harvest.ps1"
+
+    channel_root=repo/"research"/"youtube"/p["name"]
+    audio_dir=channel_root/"audio_fallback"
+    audio_manifest=audio_dir/"audio_manifest.jsonl"
+    moji_out=channel_root/"moji_work"
+    research_out=channel_root/"diarized_transcripts"
     logs=repo/"research"/"runtime"/"logs"
-    pairs=[
-        ("Url",p["url"]),("Name",p["name"]),
-        ("Workers",p.get("caption_workers",8)),
-        ("AudioWorkers",p.get("audio_workers",4)),
-        ("Device",p.get("device","cuda")),
-        ("WhisperModel",p.get("whisper_model","medium.en")),
-        ("ComputeType",p.get("compute_type","int8")),
-        ("BatchSize",p.get("batch_size",4)),
-    ]
-    code=run_logged(
-        ps(runner,pairs,["ProcessCaptionless","SkipHarvest","SkipAudioDownload"]),
-        logs/f"job_{job['id']}_gpu_moji.log",repo
-    )
-    if code:
-        raise RuntimeError(f"Moji GPU pipeline exit code {code}")
+    log_path=logs/f"job_{job['id']}_gpu_moji.log"
+    log_path.parent.mkdir(parents=True,exist_ok=True)
+
+    cmd_scan,cmd_diarize,cmd_embed,cmd_cluster,cmd_extract,cmd_transcribe=moji_funcs
+
+    with log_path.open("a",encoding="utf-8",errors="replace") as log, contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+        print("\n=== "+now()+" ===")
+        print(f"Resident Moji root: {moji_root}")
+        print(f"GPU memory before: {json.dumps(gpu_memory())}")
+
+        cmd_scan(Namespace(output=str(moji_out),force=False,input=str(audio_dir),hash="sha256"))
+        cmd_diarize(Namespace(output=str(moji_out),force=False,hf_token=None,device=p.get("device","cuda")))
+        cmd_embed(Namespace(
+            output=str(moji_out),force=False,embed_device="cpu",
+            embedding_model=p.get("embedding_model","hbredin/wespeaker-voxceleb-resnet34-LM"),
+            embedding_segments=int(p.get("embedding_segments",20))
+        ))
+        cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
+        cmd_extract(Namespace(
+            output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
+            gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
+        ))
+        cmd_transcribe(Namespace(
+            output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
+            language=p.get("language","en"),device=p.get("device","cuda"),
+            compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
+        ))
+
+        bridge=repo/"scripts"/"import_moji_research_transcripts.py"
+        cp=subprocess.run([
+            sys.executable,str(bridge),"--moji-output",str(moji_out),
+            "--audio-manifest",str(audio_manifest),"--output",str(research_out)
+        ],cwd=str(repo),text=True)
+        if cp.returncode:
+            raise RuntimeError(f"timestamp bridge exit code {cp.returncode}")
+        print(f"GPU memory after: {json.dumps(gpu_memory())}")
 
     cid=p["channel_id"]; gen=p["generation"]
     enqueue(hub,kind="analysis_sync",lane="cpu",payload=p,job_key=f"analysis:gpu:{cid}:{gen}",priority=30)
     enqueue(hub,kind="spider_channel",lane="cpu",payload=p,job_key=f"spider:gpu:{cid}:{gen}",priority=50)
-    return {"exit_code":0,"channel_id":cid,"generation":gen}
+    return {
+        "exit_code":0,"channel_id":cid,"generation":gen,
+        "diarized_transcript":str(research_out/"diarized_transcript.csv"),
+        "gpu_memory":gpu_memory()
+    }
 
 def main():
     ap=argparse.ArgumentParser()
@@ -103,14 +159,20 @@ def main():
     ap.add_argument("--port",type=int,default=8767)
     ap.add_argument("--poll",type=float,default=1.0)
     ap.add_argument("--lease-seconds",type=int,default=7200)
+    ap.add_argument("--moji-root",default="")
     args=ap.parse_args()
 
     repo=Path(__file__).resolve().parents[1]
+    moji_root=detect_moji_root(args.moji_root)
+    moji_funcs=load_moji(moji_root)
+
     state=State(); StatusAPI.state=state
     server=ThreadingHTTPServer((args.host,args.port),StatusAPI)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     worker=f"{socket.gethostname()}-gpu-1"
     print(f"GPU pipeline service http://{args.host}:{args.port} single-consumer hub={args.hub}")
+    print(f"Resident Moji root: {moji_root}")
+    print(json.dumps(gpu_memory(),indent=2))
 
     try:
         while True:
@@ -122,7 +184,7 @@ def main():
                 time.sleep(args.poll); continue
             state.set_active(job); hb=HeartbeatThread(args.hub,job["id"],worker,args.lease_seconds); hb.start(); ok=False
             try:
-                result=handle(job,repo,args.hub)
+                result=handle(job,repo,args.hub,moji_root,moji_funcs)
                 complete(args.hub,job_id=job["id"],worker=worker,result=result); ok=True
             except Exception as e:
                 try: fail(args.hub,job_id=job["id"],worker=worker,error=repr(e),retry_delay=120)
