@@ -2,10 +2,11 @@ param(
     [ValidateSet("inventory","captions","full")]
     [string]$Mode = "inventory",
     [string]$Registry = "data\youtube_channels.csv",
-    [int]$Workers = 2,
+    [int]$Workers = 8,
     [int]$LimitChannels = 0,
     [int]$LimitVideos = 0,
     [int]$CaptionlessLimit = 0,
+    [int]$AudioWorkers = 4,
     [switch]$SkipSpider
 )
 
@@ -48,7 +49,8 @@ foreach ($ch in $channels) {
         "-File",$runner,
         "-Url",$ch.youtube_url,
         "-Name",$safeName,
-        "-Workers","$Workers"
+        "-Workers","$Workers",
+        "-AudioWorkers","$AudioWorkers"
     )
 
     if ($LimitVideos -gt 0) { $args += @("-Limit","$LimitVideos") }
