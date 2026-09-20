@@ -26,6 +26,11 @@ from pathlib import Path
 TARGET_KBPS = 128
 DEFAULT_WORKERS = 4
 YOUTUBE_FALLBACK_CLIENTS = "default,web_embedded"
+COOKIE_BROWSER = ""
+SLEEP_REQUESTS = 1.5
+SLEEP_INTERVAL = 2.0
+MAX_SLEEP_INTERVAL = 5.0
+REMOTE_EJS = True
 AUDIO_EXTENSIONS = {".opus", ".m4a", ".mp3", ".aac", ".ogg", ".wav", ".flac", ".webm"}
 
 def common_ytdlp_args():
