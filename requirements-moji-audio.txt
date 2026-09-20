@@ -1,0 +1,6 @@
+# M0J1M0J1-derived captionless-audio fallback.
+# Install a CUDA-enabled PyTorch + torchaudio build suitable for your NVIDIA driver first.
+pyannote.audio>=4.0.7,<5
+whisperx>=3.7,<4
+numpy>=2.0
+huggingface_hub>=0.34
