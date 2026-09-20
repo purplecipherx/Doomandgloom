@@ -126,7 +126,15 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         with WRITE_LOCK:
             code=run_logged([str(ytpy),str(script),"--research-root",str(channel_root),"--output-dir",str(repo/"data"/"analysis")],
                             logs/f"job_{job['id']}_analysis.log",repo)
-        if code: raise RuntimeError(f"analysis ledger exit code {code}")
+            if code: raise RuntimeError(f"analysis ledger exit code {code}")
+            review_script=repo/"scripts"/"queue_semantic_review.py"
+            review_code=run_logged([
+                str(ytpy),str(review_script),
+                "--ledger",str(repo/"data"/"analysis"/"transcript_units.csv"),
+                "--output-dir",str(repo/"data"/"analysis"/"review_batches"),
+                "--batch-size","40","--hub",hub
+            ],logs/f"job_{job['id']}_review_queue.log",repo)
+            if review_code: raise RuntimeError(f"semantic review queue exit code {review_code}")
         return {"exit_code":0,"ledger":str(repo/"data"/"analysis"/"transcript_units.csv")}
 
     if kind=="spider_channel":
