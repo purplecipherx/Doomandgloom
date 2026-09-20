@@ -1,1 +1,2 @@
 yt-dlp
+networkx>=3.4,<4
