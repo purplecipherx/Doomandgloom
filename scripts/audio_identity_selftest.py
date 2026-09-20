@@ -32,6 +32,8 @@ def main():
 
         n=build_candidates(conn,0.8)
         assert n>=1
+        n_again=build_candidates(conn,0.8)
+        assert n_again==0, f"incremental matcher recomputed {n_again} pair(s)"
 
         voice=new_voice(conn,"Test Speaker","entity_test","VERIFIED",1.0,"selftest")
         bind(conn,"AC_A",voice,"VERIFIED",1.0,{"selftest":True},"selftest")
@@ -71,6 +73,7 @@ def main():
         print(json.dumps({
             "ok":True,
             "voice_match_candidates":conn.execute("SELECT COUNT(*) FROM voice_match_candidates").fetchone()[0],
+            "second_match_pass_new_pairs":n_again,
             "hypothesis_status":h["status"],
             "context_score":h["context_score"],
             "acoustic_score":h["acoustic_score"],
