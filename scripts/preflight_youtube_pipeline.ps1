@@ -66,29 +66,31 @@ if (Test-Path $ytPython) {
         "audio_identity_db.py",
         "audio_identity_selftest.py",
         "spider_precision_selftest.py",
-        "build_voice_index_queue.py"
+        "build_voice_index_queue.py",
+        "align_captions_to_speakers.py",
+        "caption_voice_selftest.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
     if ($LASTEXITCODE -eq 0) { Pass "Python scripts compile cleanly" } else { Fail "Python syntax compilation failed" }
 
     & $ytPython -c "import networkx as nx; print('networkx=' + nx.__version__)"
+    if ($LASTEXITCODE -eq 0) { Pass "NetworkX graph analysis dependency available" } else { Fail "NetworkX missing; rerun scripts\setup_youtube_harvester.ps1" }
+
     & $ytPython -c "import numpy as np; print('numpy=' + np.__version__)"
     if ($LASTEXITCODE -eq 0) { Pass "NumPy voice matching dependency available" } else { Fail "NumPy missing; rerun scripts\setup_youtube_harvester.ps1" }
 
-    if ($LASTEXITCODE -eq 0) { Pass "NetworkX graph analysis dependency available" } else { Fail "NetworkX missing; rerun scripts\setup_youtube_harvester.ps1" }
-
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
+
     & $ytPython (Join-Path $PSScriptRoot "audio_identity_selftest.py")
-    & $ytPython (Join-Path $PSScriptRoot "spider_precision_selftest.py")
-    & $ytPython (Join-Path $PSScriptRoot "caption_voice_selftest.py")
-    if ($LASTEXITCODE -eq 0) { Pass "Caption-to-speaker alignment regression self-test" } else { Fail "Caption-to-speaker alignment self-test failed" }
-
-    if ($LASTEXITCODE -eq 0) { Pass "Spider high-precision candidate regression self-test" } else { Fail "Spider precision regression self-test failed" }
-
     if ($LASTEXITCODE -eq 0) { Pass "Voice identity acoustic/context fusion self-test" } else { Fail "Voice identity fusion self-test failed" }
 
-    if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
+    & $ytPython (Join-Path $PSScriptRoot "spider_precision_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Spider high-precision candidate regression self-test" } else { Fail "Spider precision regression self-test failed" }
+
+    & $ytPython (Join-Path $PSScriptRoot "caption_voice_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Caption-to-speaker alignment regression self-test" } else { Fail "Caption-to-speaker alignment self-test failed" }
 
     & $ytPython -m yt_dlp --version
     if ($LASTEXITCODE -eq 0) { Pass "yt-dlp available" } else { Fail "yt-dlp unavailable in .venv-youtube" }
