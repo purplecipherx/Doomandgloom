@@ -6,6 +6,7 @@ param(
     [int]$Workers = 2,
     [double]$Sleep = 0.75,
     [int]$Limit = 0,
+    [int]$CaptionlessLimit = 0,
     [switch]$InventoryOnly,
     [switch]$ProcessCaptionless,
     [string]$MojiRoot = "",
@@ -93,7 +94,9 @@ if (-not $MojiRoot) {
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
 $audioScript = Join-Path $PSScriptRoot "download_captionless_audio.py"
-& $harvestPython $audioScript $queue
+$audioArgs = @($audioScript, $queue)
+if ($CaptionlessLimit -gt 0) { $audioArgs += @("--limit", "$CaptionlessLimit") }
+& $harvestPython @audioArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $audioDir = Join-Path $channelOut "audio_fallback"
