@@ -725,3 +725,172 @@ The final plain-English reporting should make it possible to answer:
 - Which criticisms fail?
 
 That is the evidentiary backbone of the project.
+
+
+---
+
+# Final hardening layer — locked
+
+These requirements are mandatory before publishing major findings.
+
+## A. Source preservation and chain of custody
+
+For every high-value source preserve, where lawful and practical:
+- canonical URL;
+- archive URL;
+- publication/access date;
+- author/publisher;
+- local filename or artifact reference;
+- cryptographic hash for downloaded documents;
+- screenshot or PDF page reference when visual context matters;
+- transcription provenance for audio/video.
+
+If a source later changes or disappears, retain the earlier version and record the change.
+
+## B. Source deduplication
+
+Do not count syndicated copies, mirrors, press-release rewrites, or articles that merely repeat the same underlying source as independent corroboration.
+
+Maintain an **evidentiary lineage** field:
+original source → derivative source → commentary source.
+
+The 50-source minimum means **50 distinct sources**, not 50 URLs.
+
+## C. Entity alias registry
+
+Maintain canonical IDs for:
+- people;
+- aliases;
+- companies;
+- DBAs;
+- former company names;
+- product brands;
+- domains;
+- shell/holding companies;
+- nonprofit entities.
+
+Every graph edge and money record must point to canonical IDs.
+
+## D. Change detection
+
+Track changes to:
+- biographies;
+- product claims;
+- prices;
+- refund terms;
+- disclosures;
+- sponsor lists;
+- predictions;
+- ownership statements;
+- "Made in USA" language;
+- medical/scientific claims.
+
+Record before/after versions with dates.
+
+## E. Publication gate
+
+A major damaging claim may enter the final exposé as **fact** only if:
+1. the evidence is proportionate to the seriousness of the allegation;
+2. primary evidence has been sought;
+3. the subject's best available rebuttal has been checked;
+4. contradictory evidence has been recorded;
+5. source lineage is known;
+6. the claim has a confidence rating;
+7. wording distinguishes allegation, inference, and adjudicated fact.
+
+## F. Reproducibility packet
+
+Every major finding should be reproducible by another researcher using:
+- source IDs;
+- URLs/archives;
+- exact quotes or timestamp ranges;
+- calculations;
+- data transformations;
+- graph edges;
+- product records;
+- money-flow records.
+
+No important conclusion should depend on a private intuition that cannot be reconstructed from the repo.
+
+## G. Confidence scale
+
+Use:
+- **VERY HIGH** — multiple strong independent/primary sources
+- **HIGH** — strong source plus corroboration
+- **MEDIUM** — credible but incomplete
+- **LOW** — plausible lead, weak evidence
+- **UNVERIFIED** — allegation/lead only
+
+## H. False-positive control
+
+For each investigation category, deliberately include examples of:
+- a scary claim that turned out accurate;
+- a product that actually performs as advertised;
+- a relationship that looked suspicious but had an innocent explanation;
+- a critic whose attack failed verification.
+
+This calibrates the project and reduces confirmation bias.
+
+## I. Legal / wording review
+
+Before publishing claims involving:
+- fraud;
+- scam;
+- manipulation;
+- Ponzi scheme;
+- criminal conduct;
+- medical deception;
+- undisclosed financial interest;
+- securities misconduct;
+
+verify whether there is:
+- conviction;
+- plea;
+- regulator finding;
+- court judgment;
+- settlement;
+- documented financial record;
+- or only an allegation.
+
+Use the strongest accurate term supported by the record.
+
+## J. Evidence coverage dashboard
+
+For every core entity show:
+- total distinct sources;
+- primary sources;
+- independent journalism;
+- original statements;
+- customer/community sources;
+- product records;
+- money records;
+- court/regulator records;
+- unresolved allegations;
+- rebuttals captured;
+- publication readiness.
+
+## K. Watchlist / update queue
+
+Maintain a queue for:
+- new products;
+- new sponsors;
+- new companies;
+- deleted pages;
+- new conferences;
+- new predictions;
+- regulatory actions;
+- lawsuits;
+- price changes;
+- ownership changes.
+
+The project should be able to update without rebuilding the whole investigation.
+
+## L. Final objective
+
+The project should not merely say that an ecosystem is bad.
+
+It should be able to show, where supported:
+
+**who said what → what evidence existed → what they sold → who owned/made it → who got paid → what conflicts were disclosed → whether the claim/product held up → how the story changed over time.**
+
+That is now the locked publication standard.
