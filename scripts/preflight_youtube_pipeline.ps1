@@ -64,7 +64,8 @@ if (Test-Path $ytPython) {
         "build_dynamic_graph.py",
         "detect_investigative_motifs.py",
         "audio_identity_db.py",
-        "audio_identity_selftest.py"
+        "audio_identity_selftest.py",
+        "spider_precision_selftest.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
@@ -78,6 +79,9 @@ if (Test-Path $ytPython) {
 
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
     & $ytPython (Join-Path $PSScriptRoot "audio_identity_selftest.py")
+    & $ytPython (Join-Path $PSScriptRoot "spider_precision_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Spider high-precision candidate regression self-test" } else { Fail "Spider precision regression self-test failed" }
+
     if ($LASTEXITCODE -eq 0) { Pass "Voice identity acoustic/context fusion self-test" } else { Fail "Voice identity fusion self-test failed" }
 
     if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
