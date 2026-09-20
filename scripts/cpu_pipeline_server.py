@@ -17,6 +17,8 @@ from pathlib import Path
 from pipeline_client import complete, enqueue, fail, heartbeat, lease
 
 WRITE_LOCK = threading.Lock()
+HARVEST_SEM = threading.Semaphore(2)
+AUDIO_SEM = threading.Semaphore(2)
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -95,10 +97,11 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
             ("Workers",payload.get("caption_workers",8)),("Sleep",payload.get("sleep",0.75))
         ]
         if int(payload.get("limit_videos",0) or 0)>0: pairs.append(("Limit",payload["limit_videos"]))
-        code=run_logged(ps(runner,pairs),logs/f"job_{job['id']}_harvest.log",repo)
+        with HARVEST_SEM:
+            code=run_logged(ps(runner,pairs),logs/f"job_{job['id']}_harvest.log",repo)
         if code: raise RuntimeError(f"harvest exit code {code}")
         queue_followups(hub,payload,"captions")
-        enqueue(hub,kind="prepare_audio",lane="cpu",payload=payload,job_key=f"audio:{payload['channel_id']}:{payload['generation']}",priority=40)
+        enqueue(hub,kind="prepare_audio",lane="cpu",payload=payload,job_key=f"audio:{payload['channel_id']}:{payload['generation']}",priority=5)
         return {"exit_code":0,"channel_root":str(channel_root)}
 
     if kind=="prepare_audio":
@@ -107,7 +110,8 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         cmd=[str(ytpy),str(script),str(queue),"--workers",str(payload.get("audio_workers",audio_workers))]
         if int(payload.get("captionless_limit",0) or 0)>0:
             cmd += ["--limit",str(payload["captionless_limit"])]
-        code=run_logged(cmd,logs/f"job_{job['id']}_audio.log",repo)
+        with AUDIO_SEM:
+            code=run_logged(cmd,logs/f"job_{job['id']}_audio.log",repo)
         if code: raise RuntimeError(f"audio prefetch exit code {code}")
         manifest=channel_root/"audio_fallback"/"audio_manifest.jsonl"
         ready=0
@@ -177,14 +181,19 @@ def main():
     ap.add_argument("--port",type=int,default=8766)
     ap.add_argument("--workers",type=int,default=4)
     ap.add_argument("--audio-workers",type=int,default=4)
+    ap.add_argument("--harvest-slots",type=int,default=2)
+    ap.add_argument("--audio-slots",type=int,default=2)
     ap.add_argument("--poll",type=float,default=1.0)
     ap.add_argument("--lease-seconds",type=int,default=1800)
     args=ap.parse_args()
+    global HARVEST_SEM, AUDIO_SEM
+    HARVEST_SEM = threading.Semaphore(max(1,args.harvest_slots))
+    AUDIO_SEM = threading.Semaphore(max(1,args.audio_slots))
     repo=Path(__file__).resolve().parents[1]
     state=State(); StatusAPI.state=state
     server=ThreadingHTTPServer((args.host,args.port),StatusAPI)
     threading.Thread(target=server.serve_forever,daemon=True).start()
-    print(f"CPU pipeline service http://{args.host}:{args.port} workers={args.workers} hub={args.hub}")
+    print(f"CPU pipeline service http://{args.host}:{args.port} workers={args.workers} harvest_slots={args.harvest_slots} audio_slots={args.audio_slots} hub={args.hub}")
     with ThreadPoolExecutor(max_workers=max(1,args.workers)) as ex:
         for i in range(max(1,args.workers)): ex.submit(worker_loop,i+1,args,repo,state)
         try:
