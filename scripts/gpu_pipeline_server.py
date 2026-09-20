@@ -96,6 +96,30 @@ def detect_moji_root(explicit=""):
 def stage(log, name):
     print(f"\n--- STAGE {name} @ {now()} ---", flush=True)
 
+def reconcile_batch_source_index(moji_out: Path, audio_dir: Path):
+    """For isolated batch workspaces, prune DB rows for source files no longer on disk.
+
+    This makes retries idempotent when a temporary download file (e.g. .m4a)
+    was indexed and later replaced/deleted after normalization to .128k.opus.
+    Cascading foreign keys remove any derived rows tied to the stale source.
+    """
+    import sqlite3
+    db=moji_out/"voice_harvester.sqlite"
+    if not db.exists():
+        return {"removed":0,"remaining":0}
+    current={str(p.resolve()) for p in audio_dir.rglob("*") if p.is_file()}
+    conn=sqlite3.connect(str(db),timeout=60)
+    conn.row_factory=sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    rows=conn.execute("SELECT id,path FROM source_files").fetchall()
+    stale=[r for r in rows if str(Path(r["path"]).resolve()) not in current]
+    for r in stale:
+        conn.execute("DELETE FROM source_files WHERE id=?",(r["id"],))
+    conn.commit()
+    remaining=conn.execute("SELECT COUNT(*) FROM source_files").fetchone()[0]
+    conn.close()
+    return {"removed":len(stale),"remaining":int(remaining)}
+
 def load_moji(moji_root:Path):
     root=str(moji_root)
     if root not in sys.path: sys.path.insert(0,root)
@@ -133,6 +157,9 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
 
         stage(log,"scan")
         cmd_scan(Namespace(output=str(moji_out),force=False,input=str(audio_dir),hash="sha256"))
+        if batch_mode:
+            rec=reconcile_batch_source_index(moji_out,audio_dir)
+            print(f"Batch source reconciliation: removed={rec['removed']} remaining={rec['remaining']}",flush=True)
         stage(log,"diarize")
         cmd_diarize(Namespace(output=str(moji_out),force=False,hf_token=None,device=p.get("device","cuda")))
         stage(log,"embed")
