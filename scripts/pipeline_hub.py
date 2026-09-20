@@ -167,6 +167,14 @@ class JobDB:
             self.event(job_id,"failed",worker,{"error":str(error)})
         return True
 
+    def close(self):
+        c = getattr(self.local, "conn", None)
+        if c is not None:
+            try:
+                c.close()
+            finally:
+                self.local.conn = None
+
     def stats(self):
         c=self.conn(); self.reclaim_expired()
         rows=c.execute("SELECT lane,state,COUNT(*) n FROM jobs GROUP BY lane,state ORDER BY lane,state").fetchall()
