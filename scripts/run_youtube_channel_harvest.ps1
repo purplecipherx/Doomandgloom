@@ -68,6 +68,7 @@ if (-not $ProcessCaptionless) {
 
 if (-not $MojiRoot) {
     $candidates = @(
+        "$env:USERPROFILE\Desktop\M0J1M0J1_VOICE",
         "$env:USERPROFILE\Desktop\M0J1M0J1_GPU",
         "$env:USERPROFILE\Desktop\M0J1M0J1"
     )
@@ -87,7 +88,7 @@ if (-not $MojiRoot) {
 }
 
 if (-not $MojiRoot) {
-    throw "Could not find voice_harvest.py under M0J1M0J1_GPU or M0J1M0J1."
+    throw "Could not find voice_harvest.py under M0J1M0J1_VOICE, M0J1M0J1_GPU, or M0J1M0J1."
 }
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
@@ -107,6 +108,7 @@ if (-not $audioFiles -or $audioFiles.Count -eq 0) {
 
 $mojiPythonCandidates = @(
     (Join-Path $MojiRoot ".venv-voice-harvester\Scripts\python.exe"),
+    "$env:USERPROFILE\Desktop\M0J1M0J1_VOICE\.venv-voice-harvester\Scripts\python.exe",
     "$env:USERPROFILE\Desktop\M0J1M0J1\.venv-voice-harvester\Scripts\python.exe",
     "$env:USERPROFILE\Desktop\M0J1M0J1_GPU\.venv-voice-harvester\Scripts\python.exe"
 )
@@ -115,7 +117,7 @@ foreach ($candidate in $mojiPythonCandidates) {
     if (Test-Path $candidate) { $mojiPython = $candidate; break }
 }
 if (-not $mojiPython) {
-    foreach ($root in @("$env:USERPROFILE\Desktop\M0J1M0J1_GPU", "$env:USERPROFILE\Desktop\M0J1M0J1")) {
+    foreach ($root in @("$env:USERPROFILE\Desktop\M0J1M0J1_VOICE", "$env:USERPROFILE\Desktop\M0J1M0J1_GPU", "$env:USERPROFILE\Desktop\M0J1M0J1")) {
         if (-not (Test-Path $root)) { continue }
         $found = Get-ChildItem $root -Recurse -File -Filter "python.exe" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -like "*\.venv-voice-harvester\Scripts\python.exe" } |
