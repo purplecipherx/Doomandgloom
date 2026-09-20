@@ -129,7 +129,7 @@ if (-not $mojiPython) {
 
 & $mojiPython -c "import os; from huggingface_hub import get_token; raise SystemExit(0 if (os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN') or get_token()) else 1)"
 if ($LASTEXITCODE -ne 0) {
-    throw "No Hugging Face authentication found. Run the Moji venv Python with: python -c \"from huggingface_hub import login; login()\""
+    throw 'No Hugging Face authentication found. Run the Moji venv Python with: python -c "from huggingface_hub import login; login()"'
 }
 
 $mojiOut = Join-Path $channelOut "moji_work"
