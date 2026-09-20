@@ -20,20 +20,15 @@ Set-Location $repoRoot
 $python = Join-Path $repoRoot ".venv-youtube\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "Missing .venv-youtube Python: $python" }
 
-# VERIFIED registry sources materially relevant to the Fitts/Armstrong research sets.
+# Research-set membership lives in data/research_sets/fitts_armstrong_full.csv.
 # Inclusion means acquisition relevance, not ally/coordination/financial relationship.
-$selectedChannelIds = @(
-    "YT001", # Catherine Austin Fitts / Solari
-    "YT002", # Martin Armstrong / Armstrong Economics
-    "YT003", # USAWatchdog - recurring Fitts/Armstrong interviewer
-    "YT004", # Sarah Westall - recurring Fitts/Armstrong interviewer
-    "YT005", # HighWire / Del Bigtree - Fitts media/health bridge
-    "YT006", # Children's Health Defense - Solari collaboration/media ecosystem
-    "YT007", # Peak Prosperity - finance/collapse media overlap
-    "YT008", # UK Column - recurring Fitts/symposium/media hub
-    "YT009", # Canadian Prepper - Armstrong media circuit
-    "YT010", # Commodity Culture - Armstrong media circuit
-    "YT011"  # Coffee and a Mike - Fitts/Armstrong interview bridge
+$researchSetPath = Join-Path $repoRoot "data\research_sets\fitts_armstrong_full.csv"
+if (-not (Test-Path $researchSetPath)) { throw "Missing $researchSetPath" }
+$researchSet = @(Import-Csv $researchSetPath)
+$fullEntityIds = @(
+    $researchSet |
+        Where-Object { $_.acquisition_scope.Trim().ToLowerInvariant() -eq "full_channel" } |
+        ForEach-Object { $_.entity_id }
 )
 
 $registryPath = Join-Path $repoRoot "data\youtube_channels.csv"
@@ -44,15 +39,15 @@ if (-not (Test-Path $entitiesPath)) { throw "Missing $entitiesPath" }
 $registry = @(Import-Csv $registryPath)
 $selected = @(
     $registry | Where-Object {
-        $selectedChannelIds -contains $_.channel_id -and
+        $fullEntityIds -contains $_.entity_id -and
         $_.enabled.ToLowerInvariant() -eq "true" -and
         $_.verification_status.Trim().ToLowerInvariant() -eq "verified"
-    }
+    } | Sort-Object channel_id
 )
 
-$missingIds = @($selectedChannelIds | Where-Object { $_ -notin $selected.channel_id })
-if ($missingIds.Count -gt 0) {
-    throw ("Selected verified channel IDs missing/disabled: " + ($missingIds -join ", "))
+$missingFullEntities = @($fullEntityIds | Where-Object { $_ -notin $selected.entity_id })
+if ($missingFullEntities.Count -gt 0) {
+    throw ("Full-channel research entities missing a verified enabled registry channel: " + ($missingFullEntities -join ", "))
 }
 
 Write-Host ""
@@ -136,20 +131,8 @@ $verifiedEntityIds = @(
     } | ForEach-Object { $_.entity_id }
 )
 
-# Broad first-pass research set from the existing entity map. These are subjects/bridges
-# worth acquiring, not a claim that they form one coordinated group.
-$researchEntityIds = @(
-    "fitts_catherine","solari","betts_carolyn","titus_john","farrell_joseph",
-    "lynn_corey","oskam_ricardo","vanhamelen_elze","walters_jennifer",
-    "granogger_ulrike","white_james","luschas_susan","werner_richard",
-    "dowd_edward","skidmore_mark","schectman_andy","miles_franklin",
-    "tommey_polly","chd","holland_mary","mercola_joseph","bigtree_del",
-    "patrick_james","planet_lockdown","uk_column","robinson_mike","hudak_taylor",
-    "hunter_greg","usawatchdog","westall_sarah","martenson_chris",
-    "armstrong_martin","armstrong_economics","campbell_mike","lutz_kerry",
-    "pletsch_erwin","coffee_mike","commodity_culture","canadian_prepper",
-    "palisades_radio","doctors_appeal"
-)
+# The CSV is the authoritative research-set definition.
+$researchEntityIds = @($researchSet | ForEach-Object { $_.entity_id })
 
 $missingVerifiedChannels = @(
     $entities | Where-Object {
