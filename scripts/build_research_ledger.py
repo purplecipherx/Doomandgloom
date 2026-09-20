@@ -11,8 +11,8 @@ from pathlib import Path
 
 CAPTION_SUFFIX = ".segments.jsonl"
 DIARIZED_NAME = "diarized_transcript.jsonl"
-SENTENCE_RE = re.compile(r"(?<=[.!?])\\s+(?=(?:[A-Z0-9\\\"'\\(\\[]|$))")
-SPACE_RE = re.compile(r"\\s+")
+SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=(?:[A-Z0-9\"'\(\[]|$))")
+SPACE_RE = re.compile(r"\s+")
 
 FIELDS = [
     "unit_id","content_id","source_type","source_path","source_sha256",
@@ -41,7 +41,7 @@ def split_sentences(text):
     return parts or [text]
 
 def stable_id(source_sha, content_id, start, end, speaker, text, index):
-    raw = "\\x1f".join(map(str, [source_sha, content_id, start, end, speaker, text, index]))
+    raw = "\x1f".join(map(str, [source_sha, content_id, start, end, speaker, text, index]))
     return "TU_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24].upper()
 
 def iter_caption(path: Path):
