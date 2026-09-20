@@ -83,6 +83,7 @@ def main():
                         "extract_all_mentions":True,
                         "extract_atomic_claims":True,
                         "extract_claims_about_people_or_orgs":True,
+                        "extract_stances":True,
                         "extract_relationships":True,
                         "extract_products_services_sponsors_ctas":True,
                         "extract_predictions":True,
