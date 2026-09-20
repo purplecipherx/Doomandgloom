@@ -1,2 +1,3 @@
 yt-dlp
 networkx>=3.4,<4
+numpy>=1.26,<3
