@@ -48,6 +48,7 @@ def main():
                 "predicate_family":"ALLEGATION","polarity":"NEGATIVE","speaker_adoption":"ADOPTS",
                 "attribution_mode":"OWN_CLAIM","certainty":"ASSERTED","explicitness":"EXPLICIT",
                 "fact_check_need":"HIGH_PRIORITY","severity":"HIGH","relationship_evidence_state":"NONE",
+                "related_claim_refs":["C1"],
                 "source_span_text":"The Trump family is grifting in crypto."
             }],
             "mentions":[{
@@ -56,6 +57,7 @@ def main():
                 "correction_candidate":"","confidence":0.99
             }],
             "atomic_claims":[{
+                "local_claim_id":"C1",
                 "claim_text":"The Trump family is engaging in grifting in crypto.","claim_type":"misconduct_allegation",
                 "checkability":"CHECKABLE","severity":"HIGH","target_entity_ids":[],
                 "claimant_entity_id":"fitts_catherine","attribution_mode":"OWN_CLAIM","requires_primary_source":True
@@ -72,6 +74,8 @@ def main():
         assert len(events)==1
         assert events[0]["predicate_code"]=="ACCUSES_GRIFTING"
         assert events[0]["predicate_family"]=="ALLEGATION"
+        linked=json.loads(events[0]["related_claim_ids_json"])
+        assert len(linked)==1 and linked[0].startswith("CL_"),events[0]
 
         # Before second-pass verification, default investigative views must exclude the event.
         out0=root/"views_before"
@@ -106,7 +110,9 @@ def main():
         assert int(after[0]["negative_count"])==1
 
         fq=list(csv.DictReader((ad/"fact_check_queue.csv").open(encoding="utf-8-sig")))
-        assert len(fq)==1 and fq[0]["claimant_entity_id"]=="fitts_catherine" if "claimant_entity_id" in fq[0] else len(fq)==1
+        assert len(fq)==1,fq
+        assert fq[0]["claimant_entity_id"]=="fitts_catherine",fq[0]
+        assert fq[0]["local_claim_id"]=="C1",fq[0]
 
         print(json.dumps({
             "ok":True,
