@@ -1,0 +1,2 @@
+source_id,entity_id,source_type,tier,title,author_or_publisher,date_published,date_accessed,url,archive_url,claim_or_topic,relevance,stance,reliability_notes,relationship_evidence,product_evidence,money_evidence,prediction_evidence,status
+EXAMPLE-0001,fitts_catherine,government,1,"Example title","Publisher",YYYY-MM-DD,YYYY-MM-DD,https://example.com,,topic,"What this source establishes",critical,"Why reliable / limitations",,,,"queued"
