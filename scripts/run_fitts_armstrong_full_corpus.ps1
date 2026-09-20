@@ -147,7 +147,7 @@ $argsList = @(
     "--batch-size", "$BatchSize"
 )
 # No --limit-videos / --captionless-limit / --voice-index-limit: zero means unlimited.
-# Default for this special full-corpus launcher is literal full Whisper transcription.
+# Default is caption reuse + sparse voice sampling; -FullWhisperAll enables the heavy legacy path.
 if ($FullWhisperAll) { $argsList += "--force-whisper-all" }
 if ($CookiesFromBrowser.Trim()) { $argsList += @("--cookies-from-browser",$CookiesFromBrowser.Trim()) }
 if ($Force) { $argsList += "--force" }
