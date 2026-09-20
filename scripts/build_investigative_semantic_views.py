@@ -108,6 +108,33 @@ def main():
         "checkable_event_count","predicate_counts_json","topic_counts_json","mixed_stance"
     ])
 
+    # Reporter/amplifier -> target exposure is separate from semantic claimant.
+    reporter_pairs=defaultdict(lambda:{"events":0,"contents":set(),"predicates":Counter(),"adoptions":Counter()})
+    for e in events:
+        reporter=e.get("reporting_entity_id") or e.get("speaker_id") or "UNKNOWN"
+        tgt=key_target(e)
+        if not tgt:
+            continue
+        d=reporter_pairs[(reporter,tgt)]
+        d["events"]+=1
+        if e.get("content_id"):d["contents"].add(e["content_id"])
+        d["predicates"][e.get("predicate_code","")]+=1
+        d["adoptions"][e.get("speaker_adoption","")]+=1
+    reporter_rows=[]
+    for (reporter,tgt),d in reporter_pairs.items():
+        reporter_rows.append({
+            "reporting_entity":reporter,"target":tgt,"event_count":d["events"],
+            "independent_content_count":len(d["contents"]),
+            "predicate_counts_json":json.dumps(d["predicates"],ensure_ascii=False,sort_keys=True),
+            "speaker_adoption_counts_json":json.dumps(d["adoptions"],ensure_ascii=False,sort_keys=True),
+            "note":"Exposure/amplification view. The reporter may be quoting, rejecting, or neutrally reporting another actor's claim."
+        })
+    reporter_rows.sort(key=lambda r:(-r["event_count"],r["reporting_entity"],r["target"]))
+    write_csv(out/"reporter_target_exposure.csv",reporter_rows,[
+        "reporting_entity","target","event_count","independent_content_count",
+        "predicate_counts_json","speaker_adoption_counts_json","note"
+    ])
+
     # 2. Target pressure/support landscape.
     targets=defaultdict(lambda:{
         "sources":set(),"positive_sources":set(),"negative_sources":set(),"allegation_sources":set(),
@@ -254,7 +281,7 @@ def main():
 
     print(json.dumps({
         "semantic_events_used":len(events),"text_verification_required":not args.include_unverified_text_events,
-        "pair_summaries":len(pair_rows),"targets":len(target_rows),
+        "pair_summaries":len(pair_rows),"reporter_target_rows":len(reporter_rows),"targets":len(target_rows),
         "shared_target_pairs":len(shared),"rhetoric_commerce_rows":len(rc),
         "reputational_allegation_rows":len(reputational),"claim_source_rows":len(acc),
         "output_dir":str(out)
