@@ -172,6 +172,10 @@ def main():
 
     rows=list(csv.DictReader(ledger.open(encoding="utf-8-sig")))
     current_rows=[r for r in rows if r.get("source_status","CURRENT")=="CURRENT"]
+    current_ids={r["unit_id"] for r in current_rows}
+    for uid,entry in index.items():
+        if uid not in current_ids and entry.get("status") in {"PENDING","QUEUED",""}:
+            entry["status"]="SUPERSEDED"
     by_content={}
     for r in current_rows:
         by_content.setdefault(r["content_id"],[]).append(r)
