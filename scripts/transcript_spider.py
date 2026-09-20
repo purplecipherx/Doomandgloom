@@ -10,6 +10,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from build_research_ledger import reconstruct_caption_segments
+
 CAPTION_SEG_SUFFIX = ".segments.jsonl"
 DIARIZED_NAME = "diarized_transcript.jsonl"
 URL_RE = re.compile(r'https?://[^\s<>"\']+|\b(?:www\.)?[A-Za-z0-9.-]+\.(?:com|org|net|io|tv|news|co|us|gov|edu)\b', re.I)
@@ -229,19 +231,14 @@ def transcript_files(root: Path):
 def read_segments(path: Path, source_type: str):
     if source_type == "youtube_caption":
         vid = path.name[:-len(CAPTION_SEG_SUFFIX)]
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if not line.strip():
-                continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                continue
+        segments,_stats = reconstruct_caption_segments(path)
+        for o in segments:
             yield {
                 "content_id": vid,
                 "source_type": source_type,
                 "source_path": str(path),
-                "start": o.get("start", ""),
-                "end": o.get("end", ""),
+                "start": o.get("start_seconds", ""),
+                "end": o.get("end_seconds", ""),
                 "speaker": "",
                 "text": o.get("text", ""),
             }
