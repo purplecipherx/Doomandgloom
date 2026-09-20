@@ -16,3 +16,7 @@ research/youtube/**/moji_work/**/*.sqlite
 research/youtube/**/moji_work/**/*.sqlite-shm
 research/youtube/**/moji_work/**/*.sqlite-wal
 research/runtime/
+research/audio_vault/
+research/audio_identity/*.sqlite
+research/audio_identity/*.sqlite-shm
+research/audio_identity/*.sqlite-wal
