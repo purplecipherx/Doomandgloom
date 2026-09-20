@@ -49,9 +49,20 @@ def main():
     neighbor_map={}
     for content_rows in by_content.values():
         for idx,r in enumerate(content_rows):
+            def ctx(x):
+                return {
+                    "unit_id":x.get("unit_id",""),
+                    "speaker_id":x.get("speaker_id",""),
+                    "raw_speaker_id":x.get("raw_speaker_id",""),
+                    "acoustic_cluster_id":x.get("acoustic_cluster_id",""),
+                    "canonical_voice_id":x.get("canonical_voice_id",""),
+                    "resolved_entity_id":x.get("resolved_entity_id",""),
+                    "speaker_display_name":x.get("speaker_display_name",""),
+                    "text":x.get("text",""),
+                }
             neighbor_map[r["unit_id"]]={
-                "context_before":[x["text"] for x in content_rows[max(0,idx-2):idx]],
-                "context_after":[x["text"] for x in content_rows[idx+1:idx+3]],
+                "context_before":[ctx(x) for x in content_rows[max(0,idx-2):idx]],
+                "context_after":[ctx(x) for x in content_rows[idx+1:idx+3]],
             }
 
     pending=[r for r in current_rows if r.get("semantic_review_status")!="COMPLETE" and r["unit_id"] not in index]
@@ -75,6 +86,14 @@ def main():
                     "start_seconds":r["start_seconds"],
                     "end_seconds":r["end_seconds"],
                     "speaker_id":r["speaker_id"],
+                    "raw_speaker_id":r.get("raw_speaker_id",""),
+                    "acoustic_cluster_id":r.get("acoustic_cluster_id",""),
+                    "canonical_voice_id":r.get("canonical_voice_id",""),
+                    "resolved_entity_id":r.get("resolved_entity_id",""),
+                    "speaker_resolution_status":r.get("speaker_resolution_status",""),
+                    "speaker_resolution_confidence":r.get("speaker_resolution_confidence",""),
+                    "speaker_display_name":r.get("speaker_display_name",""),
+                    "channel_id":r.get("channel_id",""),
                     "text":r["text"],
                     "context_before":neighbor_map.get(r["unit_id"],{}).get("context_before",[]),
                     "context_after":neighbor_map.get(r["unit_id"],{}).get("context_after",[]),
@@ -84,6 +103,7 @@ def main():
                         "extract_atomic_claims":True,
                         "extract_claims_about_people_or_orgs":True,
                         "extract_stances":True,
+                        "extract_speaker_identity_clues":True,
                         "extract_relationships":True,
                         "extract_products_services_sponsors_ctas":True,
                         "extract_predictions":True,
