@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS identity_evidence(
   canonical_voice_id TEXT REFERENCES canonical_speakers(canonical_voice_id),
   cluster_observation_id TEXT REFERENCES acoustic_clusters(cluster_observation_id),
   evidence_type TEXT NOT NULL,
+  candidate_entity_id TEXT,
+  candidate_name TEXT,
   content_id TEXT,
   start_seconds REAL,
   end_seconds REAL,
@@ -195,6 +197,11 @@ def connect(path:Path):
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
     c.executescript(SCHEMA)
+    cols={r["name"] for r in c.execute("PRAGMA table_info(identity_evidence)")}
+    if "candidate_entity_id" not in cols:
+        c.execute("ALTER TABLE identity_evidence ADD COLUMN candidate_entity_id TEXT")
+    if "candidate_name" not in cols:
+        c.execute("ALTER TABLE identity_evidence ADD COLUMN candidate_name TEXT")
     c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)",(str(SCHEMA_VERSION),))
     c.commit()
     return c
@@ -544,12 +551,12 @@ def ingest_identity_clues(conn, clues_csv:Path):
         }
         conn.execute(
             """INSERT OR REPLACE INTO identity_evidence(
-               evidence_id,canonical_voice_id,cluster_observation_id,evidence_type,content_id,
-               start_seconds,end_seconds,evidence_text,source_id,weight,status,created_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+               evidence_id,canonical_voice_id,cluster_observation_id,evidence_type,candidate_entity_id,candidate_name,
+               content_id,start_seconds,end_seconds,evidence_text,source_id,weight,status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (evid,binding["canonical_voice_id"] if binding else None,cluster,
-             clean(r.get("evidence_type")).upper(),clean(r.get("content_id")),
-             r.get("start_seconds") or None,r.get("end_seconds") or None,
+             clean(r.get("evidence_type")).upper(),clean(r.get("claimed_entity_id")),clean(r.get("claimed_name")),
+             clean(r.get("content_id")),r.get("start_seconds") or None,r.get("end_seconds") or None,
              clean(r.get("evidence_text")),clean(r.get("unit_id")),weight,"ACTIVE",now())
         )
         conn.execute(
@@ -562,29 +569,17 @@ def ingest_identity_clues(conn, clues_csv:Path):
 
 def fuse_identity_hypotheses(conn):
     clues=conn.execute(
-        """SELECT ie.*, ie.source_id AS unit_id FROM identity_evidence ie
-           WHERE ie.status='ACTIVE'"""
+        """SELECT * FROM identity_evidence WHERE status='ACTIVE'
+           AND (COALESCE(candidate_entity_id,'')<>'' OR COALESCE(candidate_name,'')<>'')"""
     ).fetchall()
     grouped=defaultdict(list)
-    clue_csv_candidates={}
-    # Candidate identity details are stored in identity_events detail_json for now.
-    for ev in conn.execute("SELECT cluster_observation_id,detail_json FROM identity_events WHERE event_type='IDENTITY_CLUE_INGESTED'"):
-        try:d=json.loads(ev["detail_json"] or "{}")
-        except Exception:continue
-        key=(ev["cluster_observation_id"],clean(d.get("candidate_entity_id")),clean(d.get("candidate_name")))
-        clue_csv_candidates.setdefault(key,[]).append(d)
-
     for r in clues:
-        # Match evidence to candidate metadata through unit/cluster event records.
-        for key,vals in clue_csv_candidates.items():
-            if key[0]!=r["cluster_observation_id"]: continue
-            if any(clean(v.get("unit_id"))==clean(r["unit_id"]) for v in vals):
-                grouped[key].append(r)
+        key=(r["cluster_observation_id"],clean(r["candidate_entity_id"]),clean(r["candidate_name"]))
+        grouped[key].append(r)
 
     created=now(); rows=[]
     for (cluster,entity_id,name),evs in grouped.items():
         if not (entity_id or name): continue
-        # Combine independent contextual evidence without allowing repeated weak clues to exceed 1 trivially.
         products=1.0
         contents=set()
         direct=0
@@ -647,6 +642,7 @@ def fuse_identity_hypotheses(conn):
         rows.append(hid)
     conn.commit()
     return len(rows)
+
 
 def approve_hypothesis(conn,hypothesis_id,status,bound_by):
     h=conn.execute("SELECT * FROM identity_hypotheses WHERE hypothesis_id=?",(hypothesis_id,)).fetchone()
