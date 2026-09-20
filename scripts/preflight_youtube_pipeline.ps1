@@ -49,7 +49,8 @@ if (Test-Path $ytPython) {
         "discover_youtube_channels.py",
         "import_moji_research_transcripts.py",
         "transcript_spider.py",
-        "youtube_pipeline_orchestrator.py"
+        "youtube_pipeline_orchestrator.py",
+        "rebuild_spider_index.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
