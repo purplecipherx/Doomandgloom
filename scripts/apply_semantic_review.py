@@ -73,6 +73,7 @@ def main():
         r["reviewed_at"]=r.get("reviewed_at") or now()
         r["reviewer"]=r.get("reviewer") or args.reviewer
         r.setdefault("speech_act",[])
+        r.setdefault("semantic_events",[])
         r.setdefault("mentions",[])
         r.setdefault("atomic_claims",[])
         r.setdefault("relationships",[])
@@ -89,7 +90,7 @@ def main():
     write_jsonl(reviews_path,ordered)
 
     fact_checks=load_jsonl_map(ad/"fact_checks.jsonl","claim_id")
-    claims=[]; mentions=[]; relationships=[]; stances=[]; identity_clues=[]; products=[]; predictions=[]; money=[]; citations=[]
+    semantic_events=[]; claims=[]; mentions=[]; relationships=[]; stances=[]; identity_clues=[]; products=[]; predictions=[]; money=[]; citations=[]
 
     for uid,r in reviews.items():
         u=unit_map[uid]
@@ -99,8 +100,58 @@ def main():
             mentions.append({
                 "mention_id":m.get("mention_id") or sid("MN_",uid,surface,m.get("entity_type","")),
                 "unit_id":uid,"content_id":u["content_id"],"start_seconds":u["start_seconds"],"end_seconds":u["end_seconds"],
-                "speaker_id":u["speaker_id"],"surface":surface,"entity_type":m.get("entity_type",""),
-                "canonical_entity_id":m.get("canonical_entity_id",""),"confidence":m.get("confidence",""),
+                "speaker_id":u["speaker_id"],"surface":surface,
+                "normalized_surface":norm(m.get("normalized_surface") or surface),
+                "entity_type":m.get("entity_type",""),
+                "canonical_entity_id":m.get("canonical_entity_id",""),
+                "resolution_status":(m.get("resolution_status") or ("RESOLVED" if m.get("canonical_entity_id") else "UNRESOLVED")).upper(),
+                "reference_mode":(m.get("reference_mode") or "EXPLICIT").upper(),
+                "transcript_fragmented":bool(m.get("transcript_fragmented",False)),
+                "correction_candidate":norm(m.get("correction_candidate") or ""),
+                "confidence":m.get("confidence",""),
+                "source_path":u["source_path"]
+            })
+
+        for ev in r.get("semantic_events") or []:
+            predicate=(ev.get("predicate_code") or "").upper()
+            raw_predicate=norm(ev.get("raw_predicate") or ev.get("predicate_phrase") or "")
+            if not predicate:
+                continue
+            source_entity_id=ev.get("source_entity_id") or r.get("speaker_entity_id","") or u.get("resolved_entity_id","")
+            target_entity_id=ev.get("target_entity_id","")
+            target_surface=norm(ev.get("target_surface") or "")
+            target_claim_id=ev.get("target_claim_id","")
+            object_entity_id=ev.get("object_entity_id","")
+            object_surface=norm(ev.get("object_surface") or "")
+            semantic_events.append({
+                "semantic_event_id":ev.get("semantic_event_id") or sid(
+                    "SE_",uid,predicate,source_entity_id,target_entity_id,target_surface,target_claim_id,
+                    object_entity_id,object_surface,raw_predicate,ev.get("topic","")
+                ),
+                "unit_id":uid,"content_id":u["content_id"],
+                "start_seconds":u.get("start_seconds",""),"end_seconds":u.get("end_seconds",""),
+                "speaker_id":u.get("speaker_id",""),"canonical_voice_id":u.get("canonical_voice_id",""),
+                "source_entity_id":source_entity_id,"source_surface":norm(ev.get("source_surface") or ""),
+                "predicate_code":predicate,"predicate_family":(ev.get("predicate_family") or "").upper(),
+                "raw_predicate":raw_predicate,
+                "target_entity_id":target_entity_id,"target_surface":target_surface,"target_claim_id":target_claim_id,
+                "object_entity_id":object_entity_id,"object_surface":object_surface,
+                "topic":norm(ev.get("topic") or ""),
+                "polarity":(ev.get("polarity") or "NOT_APPLICABLE").upper(),
+                "speaker_adoption":(ev.get("speaker_adoption") or "ADOPTS").upper(),
+                "attribution_mode":(ev.get("attribution_mode") or "OWN_CLAIM").upper(),
+                "certainty":(ev.get("certainty") or "ASSERTED").upper(),
+                "explicitness":(ev.get("explicitness") or "EXPLICIT").upper(),
+                "negated":bool(ev.get("negated",False)),
+                "conditional":bool(ev.get("conditional",False)),
+                "hypothetical":bool(ev.get("hypothetical",False)),
+                "commerciality":(ev.get("commerciality") or "NONE").upper(),
+                "relationship_evidence_state":(ev.get("relationship_evidence_state") or "NONE").upper(),
+                "fact_check_need":(ev.get("fact_check_need") or "NONE").upper(),
+                "severity":(ev.get("severity") or "LOW").upper(),
+                "source_span_text":norm(ev.get("source_span_text") or u.get("text","")),
+                "confidence":ev.get("confidence",""),
+                "notes":norm(ev.get("notes") or ""),
                 "source_path":u["source_path"]
             })
 
@@ -225,14 +276,23 @@ def main():
                 "source_path":u["source_path"]
             })
 
+    write_csv(ad/"semantic_events.csv",semantic_events,[
+        "semantic_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","canonical_voice_id",
+        "source_entity_id","source_surface","predicate_code","predicate_family","raw_predicate",
+        "target_entity_id","target_surface","target_claim_id","object_entity_id","object_surface","topic",
+        "polarity","speaker_adoption","attribution_mode","certainty","explicitness","negated","conditional",
+        "hypothetical","commerciality","relationship_evidence_state","fact_check_need","severity",
+        "source_span_text","confidence","notes","source_path"
+    ])
     write_csv(ad/"atomic_claims.csv",claims,[
         "claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
         "checkability","severity","target_entity_ids","claimant_entity_id","attribution_mode","requires_primary_source",
         "fact_check_status","source_path"
     ])
     write_csv(ad/"mentions.csv",mentions,[
-        "mention_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","surface","entity_type",
-        "canonical_entity_id","confidence","source_path"
+        "mention_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","surface","normalized_surface",
+        "entity_type","canonical_entity_id","resolution_status","reference_mode","transcript_fragmented",
+        "correction_candidate","confidence","source_path"
     ])
     write_csv(ad/"relationship_claims.csv",relationships,[
         "relationship_claim_id","unit_id","content_id","speaker_id","subject_entity_id","object_entity_id",
@@ -319,7 +379,7 @@ def main():
             voice_identity_sync["results"]=results
 
     print(json.dumps({
-        "accepted_reviews":accepted,"total_reviews":len(reviews),"claims":len(claims),
+        "accepted_reviews":accepted,"total_reviews":len(reviews),"semantic_events":len(semantic_events),"claims":len(claims),
         "fact_checks_pending":len(unresolved),"mentions":len(mentions),"relationships":len(relationships),
         "stances":len(stances),"speaker_identity_clues":len(identity_clues),
         "voice_identity_sync":voice_identity_sync,"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
