@@ -72,15 +72,22 @@ if (-not $MojiRoot) {
         "$env:USERPROFILE\Desktop\M0J1M0J1"
     )
     foreach ($candidate in $candidates) {
-        if (Test-Path (Join-Path $candidate "voice_harvest.py")) {
+        if (-not (Test-Path $candidate)) { continue }
+        $direct = Join-Path $candidate "voice_harvest.py"
+        if (Test-Path $direct) {
             $MojiRoot = $candidate
+            break
+        }
+        $found = Get-ChildItem $candidate -Recurse -File -Filter "voice_harvest.py" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $MojiRoot = Split-Path -Parent $found.FullName
             break
         }
     }
 }
 
 if (-not $MojiRoot) {
-    throw "Could not find M0J1M0J1_GPU or M0J1M0J1 with voice_harvest.py."
+    throw "Could not find voice_harvest.py under M0J1M0J1_GPU or M0J1M0J1."
 }
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
@@ -108,11 +115,21 @@ foreach ($candidate in $mojiPythonCandidates) {
     if (Test-Path $candidate) { $mojiPython = $candidate; break }
 }
 if (-not $mojiPython) {
+    foreach ($root in @("$env:USERPROFILE\Desktop\M0J1M0J1_GPU", "$env:USERPROFILE\Desktop\M0J1M0J1")) {
+        if (-not (Test-Path $root)) { continue }
+        $found = Get-ChildItem $root -Recurse -File -Filter "python.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\.venv-voice-harvester\Scripts\python.exe" } |
+            Select-Object -First 1
+        if ($found) { $mojiPython = $found.FullName; break }
+    }
+}
+if (-not $mojiPython) {
     throw "Moji voice-harvester venv not found. Run voice_harvester\install_windows.ps1 in M0J1M0J1 first."
 }
 
-if (-not $env:HF_TOKEN -and -not $env:HUGGINGFACE_TOKEN) {
-    throw "HF_TOKEN or HUGGINGFACE_TOKEN must be set for pyannote Community-1."
+& $mojiPython -c "import os; from huggingface_hub import get_token; raise SystemExit(0 if (os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN') or get_token()) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    throw "No Hugging Face authentication found. Run the Moji venv Python with: python -c \"from huggingface_hub import login; login()\""
 }
 
 $mojiOut = Join-Path $channelOut "moji_work"
