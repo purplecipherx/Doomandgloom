@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 import sqlite3
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -199,8 +200,10 @@ def ingest_audio_manifest(conn,manifest:Path,vault_root:Path,channel_id=""):
         if not ap:continue
         p=Path(ap)
         if not p.is_absolute():
-            p=(manifest.parent/ap).resolve()
-        else:p=p.resolve()
+            candidates=[(manifest.parent/ap).resolve(),(manifest.parent.parent/ap).resolve()]
+            p=next((x for x in candidates if x.exists()),candidates[0])
+        else:
+            p=p.resolve()
         if not p.exists():continue
         digest=clean(r.get("sha256")) or sha256_file(p)
         vault=vault_copy(p,vault_root,digest)
