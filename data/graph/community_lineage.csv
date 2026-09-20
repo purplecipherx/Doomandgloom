@@ -1,0 +1,1 @@
+from_snapshot_id,from_community_id,to_snapshot_id,to_community_id,lineage_type,weighted_overlap,jaccard_overlap,shared_member_count,notes
