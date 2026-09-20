@@ -17,7 +17,11 @@ param(
     [string]$Device = "cuda",
     [string]$WhisperModel = "medium.en",
     [string]$ComputeType = "int8",
-    [int]$BatchSize = 4
+    [int]$BatchSize = 4,
+    [string]$CookiesFromBrowser = "",
+    [double]$SleepRequests = 1.5,
+    [double]$SleepInterval = 2.0,
+    [double]$MaxSleepInterval = 5.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,8 +45,12 @@ $argsList = @(
     "--output", (Join-Path $repoRoot $Output),
     "--name", $Name,
     "--workers", "$Workers",
-    "--sleep", "$Sleep"
+    "--sleep", "$Sleep",
+    "--sleep-requests", "$SleepRequests",
+    "--sleep-interval", "$SleepInterval",
+    "--max-sleep-interval", "$MaxSleepInterval"
 )
+if ($CookiesFromBrowser.Trim()) { $argsList += @("--cookies-from-browser",$CookiesFromBrowser.Trim()) }
 if ($Limit -gt 0) { $argsList += @("--limit", "$Limit") }
 if ($InventoryOnly) { $argsList += "--inventory-only" }
 
