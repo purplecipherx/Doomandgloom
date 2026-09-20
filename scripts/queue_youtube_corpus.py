@@ -24,6 +24,12 @@ def main():
     ap.add_argument("--caption-workers",type=int,default=8)
     ap.add_argument("--audio-workers",type=int,default=4)
     ap.add_argument("--audio-batch-size",type=int,default=25)
+    ap.add_argument("--sparse-voice-batch-size",type=int,default=10)
+    ap.add_argument("--sparse-voice-interval-seconds",type=float,default=90.0)
+    ap.add_argument("--sparse-voice-clip-seconds",type=float,default=3.0)
+    ap.add_argument("--sparse-voice-min-cue-seconds",type=float,default=1.8)
+    ap.add_argument("--sparse-voice-min-words",type=int,default=3)
+    ap.add_argument("--sparse-voice-max-samples-per-video",type=int,default=80)
     ap.add_argument("--cookies-from-browser",default="")
     ap.add_argument("--audio-sleep-requests",type=float,default=1.5)
     ap.add_argument("--audio-sleep-interval",type=float,default=2.0)
@@ -58,6 +64,12 @@ def main():
             "caption_workers":args.caption_workers,
             "audio_workers":args.audio_workers,
             "audio_batch_size":args.audio_batch_size,
+            "sparse_voice_batch_size":args.sparse_voice_batch_size,
+            "sparse_voice_interval_seconds":args.sparse_voice_interval_seconds,
+            "sparse_voice_clip_seconds":args.sparse_voice_clip_seconds,
+            "sparse_voice_min_cue_seconds":args.sparse_voice_min_cue_seconds,
+            "sparse_voice_min_words":args.sparse_voice_min_words,
+            "sparse_voice_max_samples_per_video":args.sparse_voice_max_samples_per_video,
             "cookies_from_browser":args.cookies_from_browser,
             "audio_sleep_requests":args.audio_sleep_requests,
             "audio_sleep_interval":args.audio_sleep_interval,
