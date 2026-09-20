@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--compute-type",default="int8")
     ap.add_argument("--batch-size",type=int,default=4)
     ap.add_argument("--force",action="store_true")
+    ap.add_argument("--force-whisper-all",action="store_true")
     args=ap.parse_args()
 
     repo=Path(__file__).resolve().parents[1]
@@ -59,6 +60,7 @@ def main():
             "whisper_model":args.whisper_model,
             "compute_type":args.compute_type,
             "batch_size":args.batch_size,
+            "force_whisper_all":args.force_whisper_all,
         }
         r=enqueue(args.hub,kind="harvest_channel",lane="cpu",payload=payload,
                   job_key=f"harvest:{cid}:{run_id}",priority=10,max_attempts=3,force=args.force)
