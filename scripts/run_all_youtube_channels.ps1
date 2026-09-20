@@ -4,6 +4,7 @@ param(
     [string]$Registry = "data\youtube_channels.csv",
     [int]$Workers = 2,
     [int]$LimitChannels = 0,
+    [int]$LimitVideos = 0,
     [switch]$SkipSpider
 )
 
@@ -49,6 +50,7 @@ foreach ($ch in $channels) {
         "-Workers","$Workers"
     )
 
+    if ($LimitVideos -gt 0) { $args += @("-Limit","$LimitVideos") }
     if ($Mode -eq "inventory") { $args += "-InventoryOnly" }
     if ($Mode -eq "full") { $args += "-ProcessCaptionless" }
 
@@ -78,7 +80,7 @@ foreach ($ch in $channels) {
         Write-Host ""
         Write-Host "--- transcript spider: $($ch.channel_id) ---"
         $channelRoot = Join-Path (Join-Path $repoRoot "research\youtube") $safeName
-        & powershell.exe -ExecutionPolicy Bypass -File $spiderRunner -ResearchRoot $channelRoot -BatchId $spiderBatchId
+        & powershell.exe -ExecutionPolicy Bypass -File $spiderRunner -ResearchRoot $channelRoot -BatchId $spiderBatchId -SourceLabel $ch.channel_id
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Spider failed for $($ch.channel_id); continuing batch."
         }
