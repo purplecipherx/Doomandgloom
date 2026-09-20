@@ -4,11 +4,12 @@ Bandwidth-conscious fallback acquisition for videos with no usable transcript.
 
 Policy:
 1. Prefer an audio-only stream nearest the 128 kbps target.
-2. Explicitly transcode with ffmpeg to a normalized 128 kbps Opus file for diarization/transcription.
-3. Only if no audio-only stream is available, fetch a muxed stream whose audio
-   is nearest 128 kbps, preferring the smallest/lowest-resolution candidate.
-4. ffmpeg extracts/transcodes the audio and the temporary source media is deleted.
+2. Explicitly transcode with ffmpeg to normalized 128 kbps Opus.
+3. Only if no audio-only stream is available, fetch the smallest practical muxed
+   stream whose audio is nearest 128 kbps.
+4. Delete temporary source media after extraction/transcode.
 5. Preserve info JSON + final audio SHA-256 for the audit trail.
+6. Parallelize independent downloads/transcodes with a configurable worker pool.
 """
 from __future__ import annotations
 
@@ -18,10 +19,12 @@ import hashlib
 import json
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 TARGET_KBPS = 128
+DEFAULT_WORKERS = 4
 AUDIO_EXTENSIONS = {".opus", ".m4a", ".mp3", ".aac", ".ogg", ".wav", ".flac", ".webm"}
 
 def now():
@@ -59,7 +62,7 @@ def info_json_for(vdir: Path, vid: str):
     except Exception:
         return {}, str(p)
 
-def final_audio_file(vdir: Path, vid: str):
+def final_audio_file(vdir: Path):
     candidates = []
     for p in vdir.iterdir():
         if not p.is_file():
@@ -70,8 +73,16 @@ def final_audio_file(vdir: Path, vid: str):
             candidates.append(p)
     if not candidates:
         return None
-    # The postprocessed .opus is expected to be newest.
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+def any_media_file(vdir: Path):
+    candidates = [
+        x for x in vdir.iterdir()
+        if x.is_file()
+        and not x.name.endswith(".info.json")
+        and x.suffix.lower() not in {".json", ".part", ".ytdl"}
+    ]
+    return max(candidates, key=lambda x: x.stat().st_size) if candidates else None
 
 def download_audio_only(url: str, outtmpl: str):
     return run([
@@ -86,7 +97,6 @@ def download_audio_only(url: str, outtmpl: str):
     ])
 
 def download_muxed_fallback(url: str, outtmpl: str):
-    # Only reached when no audio-only stream could be acquired.
     return run([
         "--no-playlist",
         "-f", "best[acodec!=none][vcodec!=none]",
@@ -107,17 +117,116 @@ def normalize_to_128k(source: Path, output: Path):
         "-application", "audio",
         str(output),
     ]
-    p = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       encoding="utf-8", errors="replace", timeout=1800)
+    p = subprocess.run(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        timeout=1800,
+    )
     if p.returncode:
         raise RuntimeError(p.stderr.strip() or "ffmpeg audio normalization failed")
-    return p
+
+def process_one(index: int, row: dict, queue: Path, base: Path):
+    vid = row["video_id"]
+    url = row["url"]
+    vdir = base / vid
+    vdir.mkdir(parents=True, exist_ok=True)
+    outtmpl = str(vdir / "%(id)s.%(ext)s")
+
+    for p in vdir.glob("*.part"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+    # Remove stale media from an interrupted earlier attempt, preserving JSON audit files.
+    for old_media in list(vdir.iterdir()):
+        if (
+            old_media.is_file()
+            and not old_media.name.endswith(".info.json")
+            and old_media.suffix.lower() not in {".json", ".part", ".ytdl"}
+        ):
+            try:
+                old_media.unlink()
+            except OSError:
+                pass
+
+    mode = "audio_only"
+    p = download_audio_only(url, outtmpl)
+    source_media = final_audio_file(vdir)
+
+    if not source_media:
+        mode = "muxed_video_fallback"
+        p = download_muxed_fallback(url, outtmpl)
+        source_media = any_media_file(vdir)
+
+    info, info_path = info_json_for(vdir, vid)
+    audio = None
+    ffmpeg_error = ""
+
+    if source_media:
+        audio = vdir / f"{vid}.128k.opus"
+        try:
+            normalize_to_128k(source_media, audio)
+        except Exception as e:
+            ffmpeg_error = repr(e)
+            audio = None
+        finally:
+            if source_media.exists() and (audio is None or source_media.resolve() != audio.resolve()):
+                try:
+                    source_media.unlink()
+                except OSError:
+                    pass
+
+    if audio and audio.exists():
+        status = "downloaded"
+        digest = sha256(audio)
+        rel = str(audio.relative_to(queue.parent))
+    else:
+        status = "failed"
+        digest = ""
+        rel = ""
+
+    requested = info.get("requested_downloads") or []
+    selected = requested[0] if requested else info
+    rec = {
+        "video_id": vid,
+        "url": url,
+        "title": row.get("title", ""),
+        "downloaded_at": now(),
+        "status": status,
+        "acquisition_mode": mode,
+        "target_audio_kbps": TARGET_KBPS,
+        "source_format_id": selected.get("format_id", ""),
+        "source_ext": selected.get("ext", ""),
+        "source_abr_kbps": selected.get("abr", info.get("abr", "")),
+        "source_tbr_kbps": selected.get("tbr", info.get("tbr", "")),
+        "source_height": selected.get("height", info.get("height", "")),
+        "source_filesize": selected.get("filesize", selected.get("filesize_approx", "")),
+        "final_audio_codec": "opus",
+        "final_audio_kbps": TARGET_KBPS,
+        "audio_path": rel,
+        "sha256": digest,
+        "info_json_path": info_path,
+        "temporary_source_media_retained": bool(
+            source_media and source_media.exists() and (audio is None or source_media.resolve() != audio.resolve())
+        ),
+        "ffmpeg_error": ffmpeg_error,
+        "stderr_tail": p.stderr[-1200:],
+        "_queue_index": index,
+    }
+    (vdir / "audio_manifest.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
+    return rec
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("queue_csv")
     ap.add_argument("--output-dir", default="")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     args = ap.parse_args()
 
     queue = Path(args.queue_csv).resolve()
@@ -128,6 +237,7 @@ def main():
     if args.limit > 0:
         rows = rows[:args.limit]
 
+    workers = max(1, min(args.workers, max(1, len(rows))))
     run_record = {
         "run_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_audio_fallback",
         "started_at": now(),
@@ -137,107 +247,55 @@ def main():
         "yt_dlp_version": ytdlp_version(),
         "argv": sys.argv,
         "queued_count": len(rows),
+        "workers": workers,
         "target_audio_kbps": TARGET_KBPS,
         "format_rule": (
             "audio-only nearest 128 kbps first; if unavailable, muxed fallback "
             "with audio nearest 128 kbps and smallest/lowest-resolution preference; "
-            "extract to 128 kbps Opus; delete temporary video"
+            "explicit ffmpeg transcode to 128 kbps Opus; delete temporary source media"
         ),
     }
     (base / "run_manifest.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
 
     manifest = []
-    for i, row in enumerate(rows, 1):
-        vid = row["video_id"]
-        url = row["url"]
-        vdir = base / vid
-        vdir.mkdir(parents=True, exist_ok=True)
-        outtmpl = str(vdir / "%(id)s.%(ext)s")
-
-        # Clear stale partials only. Keep prior audit JSON.
-        for p in vdir.glob("*.part"):
-            try:
-                p.unlink()
-            except OSError:
-                pass
-
-        # Remove stale retained media from an interrupted prior attempt while keeping JSON audit files.
-        for old_media in list(vdir.iterdir()):
-            if old_media.is_file() and not old_media.name.endswith(".info.json") and old_media.suffix.lower() not in {".json", ".part", ".ytdl"}:
+    if rows:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {
+                ex.submit(process_one, i, row, queue, base): row["video_id"]
+                for i, row in enumerate(rows)
+            }
+            done = 0
+            for fut in as_completed(futures):
+                vid = futures[fut]
                 try:
-                    old_media.unlink()
-                except OSError:
-                    pass
+                    rec = fut.result()
+                except Exception as e:
+                    rec = {
+                        "video_id": vid,
+                        "url": "",
+                        "title": "",
+                        "downloaded_at": now(),
+                        "status": "exception",
+                        "acquisition_mode": "",
+                        "target_audio_kbps": TARGET_KBPS,
+                        "audio_path": "",
+                        "sha256": "",
+                        "temporary_source_media_retained": False,
+                        "ffmpeg_error": "",
+                        "stderr_tail": repr(e),
+                        "_queue_index": 10**9,
+                    }
+                manifest.append(rec)
+                done += 1
+                print(
+                    f"[audio] {done}/{len(rows)} {rec['video_id']}: "
+                    f"{rec['status']} mode={rec.get('acquisition_mode','')} target={TARGET_KBPS}kbps",
+                    flush=True,
+                )
 
-        mode = "audio_only"
-        p = download_audio_only(url, outtmpl)
-        source_media = final_audio_file(vdir, vid)
-
-        if not source_media:
-            mode = "muxed_video_fallback"
-            p = download_muxed_fallback(url, outtmpl)
-            # Muxed files may have a video extension; choose the largest non-JSON media file.
-            media_candidates = [
-                x for x in vdir.iterdir()
-                if x.is_file() and not x.name.endswith(".info.json")
-                and x.suffix.lower() not in {".json", ".part", ".ytdl"}
-            ]
-            source_media = max(media_candidates, key=lambda x: x.stat().st_size) if media_candidates else None
-
-        info, info_path = info_json_for(vdir, vid)
-        audio = None
-        ffmpeg_error = ""
-        if source_media:
-            audio = vdir / f"{vid}.128k.opus"
-            try:
-                normalize_to_128k(source_media, audio)
-            except Exception as e:
-                ffmpeg_error = repr(e)
-                audio = None
-            finally:
-                if source_media and source_media.exists() and (audio is None or source_media.resolve() != audio.resolve()):
-                    try:
-                        source_media.unlink()
-                    except OSError:
-                        pass
-
-        if audio and audio.exists():
-            status = "downloaded"
-            digest = sha256(audio)
-            rel = str(audio.relative_to(queue.parent))
-        else:
-            status = "failed"
-            digest = ""
-            rel = ""
-
-        requested = info.get("requested_downloads") or []
-        selected = requested[0] if requested else info
-        rec = {
-            "video_id": vid,
-            "url": url,
-            "title": row.get("title", ""),
-            "downloaded_at": now(),
-            "status": status,
-            "acquisition_mode": mode,
-            "target_audio_kbps": TARGET_KBPS,
-            "source_format_id": selected.get("format_id", ""),
-            "source_ext": selected.get("ext", ""),
-            "source_abr_kbps": selected.get("abr", info.get("abr", "")),
-            "source_tbr_kbps": selected.get("tbr", info.get("tbr", "")),
-            "source_height": selected.get("height", info.get("height", "")),
-            "source_filesize": selected.get("filesize", selected.get("filesize_approx", "")),
-            "final_audio_codec": "opus",
-            "final_audio_kbps": TARGET_KBPS,
-            "audio_path": rel,
-            "sha256": digest,
-            "info_json_path": info_path,
-            "temporary_source_media_retained": bool(source_media and source_media.exists() and (audio is None or source_media.resolve() != audio.resolve())),
-            "ffmpeg_error": ffmpeg_error,
-            "stderr_tail": p.stderr[-1200:],
-        }
-        manifest.append(rec)
-        (vdir / "audio_manifest.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
-        print(f"[audio] {i}/{len(rows)} {vid}: {status} mode={mode} target={TARGET_KBPS}kbps", flush=True)
+    manifest.sort(key=lambda r: r.get("_queue_index", 10**9))
+    for rec in manifest:
+        rec.pop("_queue_index", None)
 
     with (base / "audio_manifest.jsonl").open("w", encoding="utf-8") as f:
         for r in manifest:
@@ -246,8 +304,10 @@ def main():
     run_record["completed_at"] = now()
     run_record["status"] = "complete"
     run_record["downloaded_count"] = sum(1 for r in manifest if r["status"] == "downloaded")
-    run_record["failed_count"] = sum(1 for r in manifest if r["status"] == "failed")
-    run_record["muxed_fallback_count"] = sum(1 for r in manifest if r["acquisition_mode"] == "muxed_video_fallback")
+    run_record["failed_count"] = sum(1 for r in manifest if r["status"] != "downloaded")
+    run_record["muxed_fallback_count"] = sum(
+        1 for r in manifest if r.get("acquisition_mode") == "muxed_video_fallback"
+    )
     (base / "run_manifest.json").write_text(json.dumps(run_record, indent=2), encoding="utf-8")
 
 if __name__ == "__main__":
