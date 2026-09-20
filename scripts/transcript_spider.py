@@ -14,6 +14,7 @@ from build_research_ledger import reconstruct_caption_segments
 
 CAPTION_SEG_SUFFIX = ".segments.jsonl"
 DIARIZED_NAME = "diarized_transcript.jsonl"
+SPIDER_PROCESSOR_VERSION = "caption_dedupe_v3"
 URL_RE = re.compile(r'https?://[^\s<>"\']+|\b(?:www\.)?[A-Za-z0-9.-]+\.(?:com|org|net|io|tv|news|co|us|gov|edu)\b', re.I)
 
 # Proper-name spans. Unknown single-token names are handled conservatively below;
@@ -394,12 +395,12 @@ def load_processed(path: Path):
     rows = []
     if path.exists():
         for r in csv.DictReader(path.open(encoding="utf-8-sig")):
-            done.add((r.get("source_path", ""), r.get("sha256", "")))
+            done.add((r.get("source_path", ""), r.get("sha256", ""), r.get("processor_version", "")))
             rows.append(r)
     return done, rows
 
 def save_processed(path: Path, rows):
-    fields = ["source_path","sha256","source_type","processed_at","batch_id","source_label"]
+    fields = ["source_path","sha256","source_type","processor_version","processed_at","batch_id","source_label"]
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
@@ -413,13 +414,16 @@ def load_master(path: Path):
 def all_run_evidence(out: Path):
     for p in (out / "runs").glob("*/mention_evidence.jsonl"):
         manifest_path = p.parent / "spider_manifest.json"
-        if manifest_path.exists():
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                if manifest.get("superseded"):
-                    continue
-            except Exception:
-                pass
+        if not manifest_path.exists():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if manifest.get("superseded"):
+            continue
+        if manifest.get("processor_version") != SPIDER_PROCESSOR_VERSION:
+            continue
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line.strip():
                 continue
@@ -545,7 +549,7 @@ def main():
     skipped = []
     for path, source_type in transcript_files(root):
         digest = sha256(path)
-        key = (str(path.resolve()), digest)
+        key = (str(path.resolve()), digest, SPIDER_PROCESSOR_VERSION)
         if key in processed:
             skipped.append(str(path))
             continue
@@ -590,6 +594,7 @@ def main():
                     "batch_id": args.batch_id,
                     "source_label": args.source_label,
                     "processed_at": processed_at,
+                    "processor_version": SPIDER_PROCESSOR_VERSION,
                     "candidate_key": key,
                     "display_name": raw,
                     "candidate_type": typ,
@@ -607,6 +612,7 @@ def main():
             "source_path": str(path.resolve()),
             "sha256": digest,
             "source_type": source_type,
+            "processor_version": SPIDER_PROCESSOR_VERSION,
             "processed_at": processed_at,
             "batch_id": args.batch_id,
             "source_label": args.source_label,
@@ -671,6 +677,15 @@ def main():
         for (a, b), n in sorted(co.items(), key=lambda x: -x[1]):
             w.writerow({"candidate_a": a, "candidate_b": b, "co_mention_count": n, "batch_id": args.batch_id})
 
+    prelim_manifest = {
+        "batch_id": args.batch_id,
+        "source_label": args.source_label,
+        "created_at": processed_at,
+        "processor_version": SPIDER_PROCESSOR_VERSION,
+        "preliminary": True,
+    }
+    (run_dir / "spider_manifest.json").write_text(json.dumps(prelim_manifest, indent=2), encoding="utf-8")
+
     save_processed(processed_path, processed_rows)
     old_master = load_master(out / "mention_candidates.csv")
     master_rows = rebuild_master(out, old_master)
@@ -679,6 +694,7 @@ def main():
         "batch_id": args.batch_id,
         "source_label": args.source_label,
         "created_at": processed_at,
+        "processor_version": SPIDER_PROCESSOR_VERSION,
         "research_root": str(root),
         "transcript_files_new": len(new_files),
         "transcript_files_skipped_already_processed": len(skipped),
