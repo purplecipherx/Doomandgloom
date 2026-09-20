@@ -106,6 +106,8 @@
     "severity": "Potential consequence if materially false/misleading; used only for review prioritization.",
     "source_span_text": "Exact supporting transcript span.",
     "confidence": "Extraction confidence 0..1.",
-    "notes": "Reviewer/model notes."
+    "notes": "Reviewer/model notes.",
+    "related_claim_refs": "Local claim IDs emitted in the same unit, e.g. C1/C2, which are deterministically mapped to stable claim IDs.",
+    "related_claim_ids_json": "Stable claim IDs written by the apply step after resolving related_claim_refs."
   }
 }
