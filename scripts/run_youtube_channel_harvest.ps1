@@ -11,6 +11,7 @@ param(
     [switch]$InventoryOnly,
     [switch]$ProcessCaptionless,
     [switch]$SkipHarvest,
+    [switch]$SkipAudioDownload,
     [string]$MojiRoot = "",
     [ValidateSet("cuda","cpu")]
     [string]$Device = "cuda",
@@ -106,10 +107,14 @@ if (-not $MojiRoot) {
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
 $audioScript = Join-Path $PSScriptRoot "download_captionless_audio.py"
-$audioArgs = @($audioScript, $queue, "--workers", "$AudioWorkers")
-if ($CaptionlessLimit -gt 0) { $audioArgs += @("--limit", "$CaptionlessLimit") }
-& $harvestPython @audioArgs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipAudioDownload) {
+    $audioArgs = @($audioScript, $queue, "--workers", "$AudioWorkers")
+    if ($CaptionlessLimit -gt 0) { $audioArgs += @("--limit", "$CaptionlessLimit") }
+    & $harvestPython @audioArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    Write-Host "Audio acquisition: SKIPPED (GPU worker expects CPU-prefetched audio)"
+}
 
 $audioDir = Join-Path $channelOut "audio_fallback"
 $audioManifest = Join-Path $audioDir "audio_manifest.jsonl"
