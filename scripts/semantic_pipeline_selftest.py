@@ -4,6 +4,8 @@ from __future__ import annotations
 import csv,json,subprocess,sys,tempfile
 from pathlib import Path
 
+from build_research_ledger import FIELDS as LEDGER_FIELDS, BUILDER_VERSION
+
 def run(cmd,cwd):
     cp=subprocess.run(cmd,cwd=str(cwd),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     if cp.returncode:
@@ -21,20 +23,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix="doomandgloom_semantic_lifecycle_") as td:
         root=Path(td); ad=root/"analysis"; ad.mkdir()
         ledger=ad/"transcript_units.csv"
-        fields=[
-            "unit_id","source_sha256","source_type","source_path","content_id","canonical_url","title",
-            "start_seconds","end_seconds","speaker_id","raw_speaker_id","acoustic_cluster_id",
-            "canonical_voice_id","resolved_entity_id","speaker_resolution_status","speaker_resolution_confidence",
-            "speaker_display_name","channel_id","text","unit_index","source_status","superseded_at",
-            "semantic_review_status","fact_check_status","created_at","last_seen_at"
-        ]
+        fields=list(LEDGER_FIELDS)
         write_csv(ledger,[{
             "unit_id":"TU_TEST","source_sha256":"abc","source_type":"youtube_caption","source_path":"test.jsonl",
-            "content_id":"VID_TEST","canonical_url":"","title":"Test","start_seconds":"10","end_seconds":"15",
+            "content_id":"VID_TEST","channel_id":"YT001","platform_channel_id":"UC_TEST","channel_name":"Test Channel",
+            "canonical_url":"https://www.youtube.com/watch?v=VID_TEST","title":"Test",
+            "published_at":"2026-01-01T00:00:00+00:00","published_date":"2026-01-01","publication_precision":"DATE",
+            "start_seconds":"10","end_seconds":"15",
             "speaker_id":"SPK_TEST","raw_speaker_id":"SPK_TEST","acoustic_cluster_id":"AC_TEST",
             "canonical_voice_id":"VOICE_TEST","resolved_entity_id":"fitts_catherine","speaker_resolution_status":"VERIFIED",
             "speaker_resolution_confidence":"1.0","speaker_display_name":"Catherine Austin Fitts","channel_id":"YT001",
-            "text":"The Trump family is grifting in crypto.","unit_index":"0","source_status":"CURRENT",
+            "text":"The Trump family is grifting in crypto.","unit_index":"0","builder_version":BUILDER_VERSION,"source_status":"CURRENT",
             "superseded_at":"","semantic_review_status":"PENDING","fact_check_status":"PENDING",
             "created_at":"2026-01-01T00:00:00+00:00","last_seen_at":"2026-01-01T00:00:00+00:00"
         }],fields)
