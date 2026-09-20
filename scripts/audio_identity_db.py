@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION=3
+SCHEMA_VERSION=4
 
 SCHEMA=r"""
 PRAGMA foreign_keys=ON;
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS acoustic_clusters(
   member_count INTEGER NOT NULL,
   speech_seconds REAL NOT NULL,
   created_at TEXT NOT NULL,
-  source_manifest_path TEXT
+  source_manifest_path TEXT,
+  matched_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_acoustic_pipeline_cluster ON acoustic_clusters(pipeline_cluster_id);
 
@@ -202,6 +203,9 @@ def connect(path:Path):
         c.execute("ALTER TABLE identity_evidence ADD COLUMN candidate_entity_id TEXT")
     if "candidate_name" not in cols:
         c.execute("ALTER TABLE identity_evidence ADD COLUMN candidate_name TEXT")
+    cluster_cols={r["name"] for r in c.execute("PRAGMA table_info(acoustic_clusters)")}
+    if "matched_at" not in cluster_cols:
+        c.execute("ALTER TABLE acoustic_clusters ADD COLUMN matched_at TEXT")
     c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)",(str(SCHEMA_VERSION),))
     c.commit()
     return c
@@ -302,10 +306,19 @@ def ingest_moji(conn,moji:Path,channel_id=""):
             (m.get("file_id"),m.get("local_speaker")) for m in members
         )))
         conn.execute("""
-          INSERT OR REPLACE INTO acoustic_clusters(
+          INSERT INTO acoustic_clusters(
             cluster_observation_id,pipeline_cluster_id,channel_id,moji_output_path,
-            embedding_model,centroid_json,member_count,speech_seconds,created_at,source_manifest_path
-          ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            embedding_model,centroid_json,member_count,speech_seconds,created_at,source_manifest_path,matched_at
+          ) VALUES(?,?,?,?,?,?,?,?,?,?,NULL)
+          ON CONFLICT(cluster_observation_id) DO UPDATE SET
+            pipeline_cluster_id=excluded.pipeline_cluster_id,
+            channel_id=excluded.channel_id,
+            moji_output_path=excluded.moji_output_path,
+            embedding_model=excluded.embedding_model,
+            centroid_json=excluded.centroid_json,
+            member_count=excluded.member_count,
+            speech_seconds=excluded.speech_seconds,
+            source_manifest_path=excluded.source_manifest_path
         """,(obs,pid,channel_id,str(moji.resolve()),"hbredin/wespeaker-voxceleb-resnet34-LM",
              json.dumps(centroid),len(members),float(c.get("speech_seconds") or 0),created,str(manifest.resolve())))
         for m in members:
@@ -407,45 +420,104 @@ def extract_exemplars(conn,moji:Path,vault_root:Path,per_local_speaker=8,min_sec
     mc.close(); conn.commit()
     return count
 
-def build_candidates(conn,min_similarity=0.58):
-    rows=conn.execute("SELECT * FROM acoustic_clusters ORDER BY created_at,cluster_observation_id").fetchall()
-    data=[]
+def build_candidates(conn,min_similarity=0.58,top_k=20,force_rematch=False):
+    import numpy as np
+
+    if force_rematch:
+        conn.execute("UPDATE acoustic_clusters SET matched_at=NULL")
+        conn.commit()
+
+    rows=[dict(r) for r in conn.execute(
+        "SELECT * FROM acoustic_clusters ORDER BY created_at,cluster_observation_id"
+    ).fetchall()]
+    if not rows:
+        return 0
+
+    groups=defaultdict(list)
     for r in rows:
-        d=dict(r); d["centroid"]=json.loads(r["centroid_json"]); data.append(d)
-    scored=defaultdict(list)
-    pairs=[]
-    for i,a in enumerate(data):
-        for b in data[i+1:]:
-            if a["cluster_observation_id"]==b["cluster_observation_id"]:continue
-            sim=cosine(a["centroid"],b["centroid"])
-            if sim<min_similarity:continue
-            pair=(a,b,sim)
-            pairs.append(pair)
-            scored[a["cluster_observation_id"]].append((sim,b["cluster_observation_id"]))
-            scored[b["cluster_observation_id"]].append((sim,a["cluster_observation_id"]))
-    ranks={}
-    margins={}
-    for cid,vals in scored.items():
-        vals=sorted(vals,reverse=True)
-        for idx,(sim,other) in enumerate(vals,1):
-            ranks[(cid,other)]=idx
-        margins[cid]=(vals[0][0]-vals[1][0]) if len(vals)>1 else (vals[0][0] if vals else 0.0)
+        try:
+            centroid=json.loads(r["centroid_json"])
+        except Exception:
+            continue
+        if not centroid:
+            continue
+        r["centroid"]=centroid
+        groups[(clean(r.get("embedding_model")),len(centroid))].append(r)
+
+    pair_metrics={}
+    newly_matched=set()
+    k=max(1,int(top_k))
+
+    for _,data in groups.items():
+        if len(data)<2:
+            for r in data:
+                if not clean(r.get("matched_at")):
+                    newly_matched.add(r["cluster_observation_id"])
+            continue
+
+        matrix=np.asarray([r["centroid"] for r in data],dtype=np.float32)
+        norms=np.linalg.norm(matrix,axis=1,keepdims=True)
+        norms=np.where(norms<=1e-12,1.0,norms)
+        matrix=matrix/norms
+        id_to_index={r["cluster_observation_id"]:i for i,r in enumerate(data)}
+        new_rows=[r for r in data if not clean(r.get("matched_at"))]
+
+        for a in new_rows:
+            ai=id_to_index[a["cluster_observation_id"]]
+            sims=matrix @ matrix[ai]
+            sims[ai]=-2.0
+            take=min(k,len(data)-1)
+            if take<=0:
+                newly_matched.add(a["cluster_observation_id"])
+                continue
+            idxs=np.argpartition(-sims,take-1)[:take]
+            idxs=idxs[np.argsort(-sims[idxs])]
+            qualified=[int(i) for i in idxs if float(sims[i])>=float(min_similarity)]
+            top_scores=[float(sims[i]) for i in qualified]
+            margin=(top_scores[0]-top_scores[1]) if len(top_scores)>1 else (top_scores[0] if top_scores else 0.0)
+
+            for rank,bi in enumerate(qualified,1):
+                b=data[bi]
+                left,right=sorted((a["cluster_observation_id"],b["cluster_observation_id"]))
+                key=(left,right)
+                pm=pair_metrics.setdefault(key,{
+                    "left":left,"right":right,"similarity":float(sims[bi]),
+                    "rank_left":None,"rank_right":None,"margin_left":None,"margin_right":None,
+                    "left_channel":"","right_channel":"",
+                })
+                pm["similarity"]=max(pm["similarity"],float(sims[bi]))
+                if a["cluster_observation_id"]==left:
+                    pm["rank_left"]=rank; pm["margin_left"]=margin
+                    pm["left_channel"]=clean(a.get("channel_id")); pm["right_channel"]=clean(b.get("channel_id"))
+                else:
+                    pm["rank_right"]=rank; pm["margin_right"]=margin
+                    pm["right_channel"]=clean(a.get("channel_id")); pm["left_channel"]=clean(b.get("channel_id"))
+            newly_matched.add(a["cluster_observation_id"])
+
     ts=now()
-    for a,b,sim in pairs:
-        left=a["cluster_observation_id"]; right=b["cluster_observation_id"]
-        cid=stable("VM_",*sorted((left,right)))
+    for pm in pair_metrics.values():
+        cid=stable("VM_",pm["left"],pm["right"])
+        same_channel=int(bool(pm["left_channel"]) and pm["left_channel"]==pm["right_channel"])
         conn.execute("""
           INSERT INTO voice_match_candidates(
             candidate_id,left_cluster_observation_id,right_cluster_observation_id,cosine_similarity,
             same_channel,rank_left,rank_right,margin_left,margin_right,status,created_at
           ) VALUES(?,?,?,?,?,?,?,?,?,'OPEN',?)
           ON CONFLICT(candidate_id) DO UPDATE SET
-            cosine_similarity=excluded.cosine_similarity,rank_left=excluded.rank_left,rank_right=excluded.rank_right,
-            margin_left=excluded.margin_left,margin_right=excluded.margin_right
-        """,(cid,left,right,sim,int(clean(a.get("channel_id"))==clean(b.get("channel_id")) and clean(a.get("channel_id"))!=""),
-             ranks.get((left,right)),ranks.get((right,left)),margins.get(left),margins.get(right),ts))
+            cosine_similarity=excluded.cosine_similarity,
+            same_channel=excluded.same_channel,
+            rank_left=COALESCE(excluded.rank_left,voice_match_candidates.rank_left),
+            rank_right=COALESCE(excluded.rank_right,voice_match_candidates.rank_right),
+            margin_left=COALESCE(excluded.margin_left,voice_match_candidates.margin_left),
+            margin_right=COALESCE(excluded.margin_right,voice_match_candidates.margin_right)
+        """,(cid,pm["left"],pm["right"],pm["similarity"],same_channel,
+             pm["rank_left"],pm["rank_right"],pm["margin_left"],pm["margin_right"],ts))
+
+    for cid in newly_matched:
+        conn.execute("UPDATE acoustic_clusters SET matched_at=? WHERE cluster_observation_id=?",(ts,cid))
     conn.commit()
-    return len(pairs)
+    return len(pair_metrics)
+
 
 def new_voice(conn,display_name="",entity_id="",status="UNKNOWN",confidence=None,notes=""):
     ts=now()
@@ -731,7 +803,7 @@ def main():
     s=sub.add_parser("ingest-audio"); s.add_argument("--manifest",required=True); s.add_argument("--vault",default="research/audio_vault"); s.add_argument("--channel-id",default="")
     s=sub.add_parser("ingest-moji"); s.add_argument("--moji-output",required=True); s.add_argument("--channel-id",default="")
     s=sub.add_parser("extract-exemplars"); s.add_argument("--moji-output",required=True); s.add_argument("--vault",default="research/audio_vault"); s.add_argument("--per-local-speaker",type=int,default=8); s.add_argument("--min-sec",type=float,default=2.0); s.add_argument("--max-sec",type=float,default=10.0)
-    s=sub.add_parser("match"); s.add_argument("--min-similarity",type=float,default=0.58)
+    s=sub.add_parser("match"); s.add_argument("--min-similarity",type=float,default=0.58); s.add_argument("--top-k",type=int,default=20); s.add_argument("--force-rematch",action="store_true")
     s=sub.add_parser("ingest-clues"); s.add_argument("--clues-csv",required=True)
     s=sub.add_parser("fuse-identities")
     s=sub.add_parser("approve-hypothesis"); s.add_argument("--hypothesis",required=True); s.add_argument("--status",required=True); s.add_argument("--bound-by",default="")
@@ -757,7 +829,7 @@ def main():
     if args.cmd=="extract-exemplars":
         print(json.dumps({"voice_exemplars":extract_exemplars(conn,Path(args.moji_output).resolve(),(repo/args.vault).resolve(),args.per_local_speaker,args.min_sec,args.max_sec)},indent=2)); return 0
     if args.cmd=="match":
-        print(json.dumps({"match_candidates":build_candidates(conn,args.min_similarity)},indent=2)); return 0
+        print(json.dumps({"match_candidates":build_candidates(conn,args.min_similarity,args.top_k,args.force_rematch)},indent=2)); return 0
     if args.cmd=="ingest-clues":
         print(json.dumps({"identity_clues_ingested":ingest_identity_clues(conn,Path(args.clues_csv).resolve())},indent=2)); return 0
     if args.cmd=="fuse-identities":
