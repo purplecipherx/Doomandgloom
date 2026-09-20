@@ -97,7 +97,7 @@ class JobDB:
             return dict(row), True
         cur=c.execute("""INSERT INTO jobs(job_key,kind,lane,payload_json,priority,state,attempts,max_attempts,
                          available_at,created_at,updated_at)
-                         VALUES(?,?,?,?,?,'queued',0,?,?,?,?,?)""",
+                         VALUES(?,?,?,?,?,'queued',0,?,?,?,?)""",
                       (job_key,kind,lane,json.dumps(payload,ensure_ascii=False),priority,max_attempts,ts,ts,ts))
         jid=cur.lastrowid
         self.event(jid,"enqueued",detail={"job_key":job_key,"kind":kind,"lane":lane})
