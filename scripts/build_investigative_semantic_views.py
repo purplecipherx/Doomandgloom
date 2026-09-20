@@ -39,11 +39,18 @@ def main():
     ap.add_argument("--analysis-dir",default="data/analysis")
     ap.add_argument("--connections",default="data/connections.csv")
     ap.add_argument("--output-dir",default="data/analysis/views")
+    ap.add_argument("--include-unverified-text-events",action="store_true")
     args=ap.parse_args()
 
     ad=Path(args.analysis_dir).resolve()
     out=Path(args.output_dir).resolve()
     events=read_csv(ad/"semantic_events.csv")
+    verifications={r.get("semantic_event_id",""):r for r in read_csv(ad/"semantic_event_verifications.csv")}
+    if not args.include_unverified_text_events:
+        if verifications:
+            events=[e for e in events if verifications.get(e.get("semantic_event_id",""),{}).get("status")=="VERIFIED_TEXT"]
+        else:
+            events=[]
     claims=read_csv(ad/"atomic_claims.csv")
     fact_checks=read_csv(ad/"fact_checks.csv")
     products=read_csv(ad/"product_mentions.csv")
@@ -202,7 +209,8 @@ def main():
     ])
 
     print(json.dumps({
-        "semantic_events":len(events),"pair_summaries":len(pair_rows),"targets":len(target_rows),
+        "semantic_events_used":len(events),"text_verification_required":not args.include_unverified_text_events,
+        "pair_summaries":len(pair_rows),"targets":len(target_rows),
         "shared_target_pairs":len(shared),"rhetoric_commerce_rows":len(rc),"claim_source_rows":len(acc),
         "output_dir":str(out)
     },indent=2))
