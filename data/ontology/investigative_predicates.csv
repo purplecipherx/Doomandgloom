@@ -417,3 +417,5 @@ ANNOUNCES,EVENT_CAUSAL,NOT_APPLICABLE,NO,"Normalized investigative semantic pred
 LAUNCHES,EVENT_CAUSAL,NOT_APPLICABLE,NO,"Normalized investigative semantic predicate"
 CANCELS,EVENT_CAUSAL,NOT_APPLICABLE,NO,"Normalized investigative semantic predicate"
 POSTPONES,EVENT_CAUSAL,NOT_APPLICABLE,NO,"Normalized investigative semantic predicate"
+PRAISES_EXPERTISE,POSITIVE_STANCE,POSITIVE,NO,"Praises a person or entity specifically for expertise or analytical quality"
+CITES_DOCUMENTARY_EVIDENCE,SOURCE_EVIDENCE,NOT_APPLICABLE,NO,"Cites documents or documentary records as supporting evidence"
