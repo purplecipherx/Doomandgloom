@@ -110,6 +110,13 @@ def main():
 
     for uid,r in reviews.items():
         u=unit_map[uid]
+        claim_ref_map={}
+        for idx,c in enumerate(r.get("atomic_claims") or [],1):
+            text=norm(c.get("claim_text"))
+            if not text:
+                continue
+            local_ref=c.get("local_claim_id") or c.get("claim_ref") or f"C{idx}"
+            claim_ref_map[str(local_ref)]=c.get("claim_id") or sid("CL_",uid,text)
         for m in r.get("mentions") or []:
             surface=norm(m.get("surface") or m.get("text"))
             if not surface: continue
@@ -142,6 +149,8 @@ def main():
             target_claim_id=ev.get("target_claim_id","")
             object_entity_id=ev.get("object_entity_id","")
             object_surface=norm(ev.get("object_surface") or "")
+            related_refs=[str(x) for x in (ev.get("related_claim_refs") or ev.get("claim_refs") or [])]
+            related_claim_ids=[claim_ref_map[x] for x in related_refs if x in claim_ref_map]
             semantic_events.append({
                 "semantic_event_id":ev.get("semantic_event_id") or sid(
                     "SE_",uid,predicate,source_entity_id,target_entity_id,target_surface,target_claim_id,
@@ -154,6 +163,8 @@ def main():
                 "predicate_code":predicate,"predicate_family":ontology_row.get("family","").upper(),
                 "raw_predicate":raw_predicate,
                 "target_entity_id":target_entity_id,"target_surface":target_surface,"target_claim_id":target_claim_id,
+                "related_claim_refs_json":json.dumps(related_refs,ensure_ascii=False),
+                "related_claim_ids_json":json.dumps(related_claim_ids,ensure_ascii=False),
                 "object_entity_id":object_entity_id,"object_surface":object_surface,
                 "topic":norm(ev.get("topic") or ""),
                 "polarity":(ev.get("polarity") or "NOT_APPLICABLE").upper(),
@@ -181,8 +192,9 @@ def main():
             checkability=(c.get("checkability") or "CHECKABLE").upper()
             fc=fact_checks.get(cid,{})
             status=fc.get("status") or ("NOT_APPLICABLE" if checkability not in CHECKABLE else "PENDING")
+            local_claim_id=c.get("local_claim_id") or c.get("claim_ref") or next((k for k,v in claim_ref_map.items() if v==cid),"")
             claims.append({
-                "claim_id":cid,"unit_id":uid,"content_id":u["content_id"],"start_seconds":u["start_seconds"],"end_seconds":u["end_seconds"],
+                "claim_id":cid,"local_claim_id":local_claim_id,"unit_id":uid,"content_id":u["content_id"],"start_seconds":u["start_seconds"],"end_seconds":u["end_seconds"],
                 "speaker_id":u["speaker_id"],"claim_text":text,"claim_type":c.get("claim_type","other"),
                 "checkability":checkability,"severity":(c.get("severity") or "LOW").upper(),
                 "target_entity_ids":json.dumps(c.get("target_entity_ids") or [],ensure_ascii=False),
@@ -298,13 +310,14 @@ def main():
     write_csv(ad/"semantic_events.csv",semantic_events,[
         "semantic_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","canonical_voice_id",
         "source_entity_id","source_surface","predicate_code","predicate_family","raw_predicate",
-        "target_entity_id","target_surface","target_claim_id","object_entity_id","object_surface","topic",
+        "target_entity_id","target_surface","target_claim_id","related_claim_refs_json","related_claim_ids_json",
+        "object_entity_id","object_surface","topic",
         "polarity","speaker_adoption","attribution_mode","certainty","explicitness","negated","conditional",
         "hypothetical","commerciality","relationship_evidence_state","fact_check_need","severity",
         "source_span_text","confidence","notes","source_path"
     ])
     write_csv(ad/"atomic_claims.csv",claims,[
-        "claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
+        "claim_id","local_claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
         "checkability","severity","target_entity_ids","claimant_entity_id","attribution_mode","requires_primary_source",
         "fact_check_status","source_path"
     ])
@@ -349,8 +362,8 @@ def main():
         "VERIFIED","SUPPORTED_INFERENCE","DISPUTED","UNVERIFIED","CONTRADICTED","OPINION_OR_NOT_CHECKABLE","NOT_APPLICABLE"
     }]
     write_csv(ad/"fact_check_queue.csv",unresolved,[
-        "claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
-        "checkability","severity","target_entity_ids","source_path"
+        "claim_id","local_claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
+        "checkability","severity","target_entity_ids","claimant_entity_id","source_path"
     ])
 
     claims_by_unit={}
