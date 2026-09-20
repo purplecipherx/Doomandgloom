@@ -191,11 +191,15 @@ def main():
             audio = vdir / f"{vid}.128k.opus"
             try:
                 normalize_to_128k(source_media, audio)
-                if source_media.resolve() != audio.resolve():
-                    source_media.unlink(missing_ok=True)
             except Exception as e:
                 ffmpeg_error = repr(e)
                 audio = None
+            finally:
+                if source_media and source_media.exists() and (audio is None or source_media.resolve() != audio.resolve()):
+                    try:
+                        source_media.unlink()
+                    except OSError:
+                        pass
 
         if audio and audio.exists():
             status = "downloaded"
@@ -227,7 +231,7 @@ def main():
             "audio_path": rel,
             "sha256": digest,
             "info_json_path": info_path,
-            "temporary_video_retained": False,
+            "temporary_source_media_retained": bool(source_media and source_media.exists() and (audio is None or source_media.resolve() != audio.resolve())),
             "ffmpeg_error": ffmpeg_error,
             "stderr_tail": p.stderr[-1200:],
         }
