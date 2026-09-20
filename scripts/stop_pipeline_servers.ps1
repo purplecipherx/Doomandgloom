@@ -6,6 +6,15 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $statePath = Join-Path $repoRoot "research\runtime\services.json"
 
+function Stop-ProcessTree([int]$ProcessId) {
+    $children = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { [int]$_.ParentProcessId -eq $ProcessId })
+    foreach ($child in $children) {
+        Stop-ProcessTree -ProcessId ([int]$child.ProcessId)
+    }
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
+
 if (-not (Test-Path $statePath)) {
     Write-Host "No pipeline services state file found."
     exit 0
@@ -13,9 +22,9 @@ if (-not (Test-Path $statePath)) {
 
 $state = Get-Content $statePath -Raw | ConvertFrom-Json
 $targets = @(
-    @{ name="hub"; pid=[int]$state.hub.pid; marker="pipeline_hub.py" },
     @{ name="cpu"; pid=[int]$state.cpu.pid; marker="cpu_pipeline_server.py" },
-    @{ name="gpu"; pid=[int]$state.gpu.pid; marker="gpu_pipeline_server.py" }
+    @{ name="gpu"; pid=[int]$state.gpu.pid; marker="gpu_pipeline_server.py" },
+    @{ name="hub"; pid=[int]$state.hub.pid; marker="pipeline_hub.py" }
 )
 
 foreach ($t in $targets) {
@@ -34,7 +43,7 @@ foreach ($t in $targets) {
     }
 
     Write-Host ("Stopping {0}: PID {1}" -f $t.name,$t.pid)
-    Stop-Process -Id $t.pid -Force -ErrorAction SilentlyContinue
+    Stop-ProcessTree -ProcessId $t.pid
 }
 
 Start-Sleep -Milliseconds 500
