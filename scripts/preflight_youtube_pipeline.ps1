@@ -177,6 +177,14 @@ if ($Mode -eq "full") {
             Remove-Item $decodeTest -Force -ErrorAction SilentlyContinue
         }
 
+        $residentImport = "import sys; sys.path.insert(0, r'$PSScriptRoot'); sys.path.insert(0, r'$mojiRoot'); import gpu_pipeline_server; import voice_harvester.diarize; import voice_harvester.cluster; import voice_harvester.export; print('resident_gpu_service_import=ok')"
+        & $mojiPython -c $residentImport
+        if ($LASTEXITCODE -eq 0) {
+            Pass "Resident GPU service imports successfully under Moji venv"
+        } else {
+            Fail "Resident GPU service failed to import under Moji venv"
+        }
+
         & $mojiPython -c "import os; from huggingface_hub import get_token; raise SystemExit(0 if (os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN') or get_token()) else 1)"
         if ($LASTEXITCODE -eq 0) {
             Pass "Hugging Face authentication available (environment or cached login)"
