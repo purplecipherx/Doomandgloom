@@ -17,6 +17,7 @@ from pathlib import Path
 from pipeline_client import complete, enqueue, fail, heartbeat, lease
 
 WRITE_LOCK = threading.Lock()
+VOICE_LOCK = threading.Lock()
 HARVEST_SEM = threading.Semaphore(2)
 AUDIO_SEM = threading.Semaphore(2)
 
@@ -125,6 +126,49 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
             enqueue(hub,kind="gpu_moji_channel",lane="gpu",payload=payload,job_key=f"gpu:{payload['channel_id']}:{payload['generation']}",priority=20,max_attempts=2)
         return {"exit_code":0,"audio_ready":ready}
 
+    if kind=="audio_identity_sync":
+        identity_script=repo/"scripts"/"audio_identity_db.py"
+        audio_manifest=channel_root/"audio_fallback"/"audio_manifest.jsonl"
+        moji_out=channel_root/"moji_work"
+        research_out=channel_root/"diarized_transcripts"
+        resolution=repo/"data"/"audio"/"speaker_resolution_current.csv"
+        voice_log=logs/f"job_{job['id']}_voice_identity.log"
+
+        with VOICE_LOCK:
+            commands=[
+                [str(ytpy),str(identity_script),"ingest-audio","--manifest",str(audio_manifest),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"ingest-moji","--moji-output",str(moji_out),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"extract-exemplars","--moji-output",str(moji_out)],
+                [str(ytpy),str(identity_script),"match","--min-similarity",str(payload.get("voice_match_floor",0.58))],
+                [str(ytpy),str(identity_script),"export","--output",str(resolution)],
+            ]
+            for cmd in commands:
+                code=run_logged(cmd,voice_log,repo)
+                if code:
+                    raise RuntimeError(f"voice identity stage failed exit={code}: {' '.join(cmd)}")
+
+            bridge=repo/"scripts"/"import_moji_research_transcripts.py"
+            bridge_cmd=[
+                str(ytpy),str(bridge),
+                "--moji-output",str(moji_out),
+                "--audio-manifest",str(audio_manifest),
+                "--output",str(research_out),
+                "--speaker-resolution",str(resolution),
+                "--channel-id",payload["channel_id"],
+            ]
+            code=run_logged(bridge_cmd,voice_log,repo)
+            if code:
+                raise RuntimeError(f"voice-aware timestamp bridge exit code {code}")
+
+        cid=payload["channel_id"]; gen=payload["generation"]
+        enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,job_key=f"analysis:voice:{cid}:{gen}",priority=30)
+        enqueue(hub,kind="spider_channel",lane="cpu",payload=payload,job_key=f"spider:voice:{cid}:{gen}",priority=50)
+        return {
+            "exit_code":0,
+            "speaker_resolution":str(resolution),
+            "diarized_transcript":str(research_out/"diarized_transcript.csv"),
+        }
+
     if kind=="analysis_sync":
         script=repo/"scripts"/"build_research_ledger.py"
         with WRITE_LOCK:
@@ -154,7 +198,7 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
 
 def worker_loop(index, args, repo, state):
     worker=f"{socket.gethostname()}-cpu-{index}"
-    kinds=["harvest_channel","prepare_audio","analysis_sync","spider_channel"]
+    kinds=["harvest_channel","prepare_audio","audio_identity_sync","analysis_sync","spider_channel"]
     while True:
         try:
             job=lease(args.hub,lane="cpu",worker=worker,kinds=kinds,lease_seconds=args.lease_seconds)
