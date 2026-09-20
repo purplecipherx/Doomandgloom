@@ -62,13 +62,17 @@ if (Test-Path $ytPython) {
         "apply_fact_checks.py",
         "pipeline_selftest.py",
         "build_dynamic_graph.py",
-        "detect_investigative_motifs.py"
+        "detect_investigative_motifs.py",
+        "audio_identity_db.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
     if ($LASTEXITCODE -eq 0) { Pass "Python scripts compile cleanly" } else { Fail "Python syntax compilation failed" }
 
     & $ytPython -c "import networkx as nx; print('networkx=' + nx.__version__)"
+    & $ytPython -c "import numpy as np; print('numpy=' + np.__version__)"
+    if ($LASTEXITCODE -eq 0) { Pass "NumPy voice matching dependency available" } else { Fail "NumPy missing; rerun scripts\setup_youtube_harvester.ps1" }
+
     if ($LASTEXITCODE -eq 0) { Pass "NetworkX graph analysis dependency available" } else { Fail "NetworkX missing; rerun scripts\setup_youtube_harvester.ps1" }
 
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
