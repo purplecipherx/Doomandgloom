@@ -188,6 +188,51 @@ The report must show its work and link directly into the evidence archive.
 
 ---
 
+## Deliverable 11 — Adversarial / support atlas
+
+Interactive, evidence-linked view of who explicitly praises, supports, endorses, defends, criticizes, disputes, accuses, warns against, or distances from whom.
+
+A stance edge is never silently treated as a relationship edge. Shared targets are investigative signals, not proof of coordination.
+
+## Deliverable 12 — Narrative propagation atlas
+
+For important claims/narratives:
+- earliest observed source;
+- amplifiers and disputants;
+- timeline and lag;
+- wording similarity/mutation;
+- cited-source lineage;
+- corrections/retractions;
+- associated products/CTAs/financial interests;
+- fact-check outcome.
+
+## Deliverable 13 — Community evolution atlas
+
+Time-versioned view of inferred communities/rings:
+- overlapping memberships;
+- hubs;
+- bridges/brokers;
+- outliers;
+- subcommunities;
+- split/merge/birth/death lineage;
+- relationship-only community view separated from discourse/stance views.
+
+## Deliverable 14 — Investigative motif register
+
+Machine-generated lead board for evidence combinations such as:
+- shared adversary among documented associates;
+- shared support target among documented associates;
+- shared sponsor/vendor/manufacturer;
+- citation loops/source laundering;
+- same unusual claim + same source + close timing;
+- reciprocal promotion;
+- fear -> CTA -> beneficiary;
+- prediction -> product pitch;
+- competitor criticism + financial interest;
+- cross-community bridge carrying narratives/products.
+
+Motifs are classified as OPEN / EXPLAINED / SUPPORTED / DISPROVEN / ESCALATED and are never published as wrongdoing merely because the pattern exists.
+
 # Data-gathering order
 
 1. inventory channels/sites/entities;
