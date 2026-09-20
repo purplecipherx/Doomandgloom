@@ -73,6 +73,7 @@ def main():
         r.setdefault("mentions",[])
         r.setdefault("atomic_claims",[])
         r.setdefault("relationships",[])
+        r.setdefault("stances",[])
         r.setdefault("products",[])
         r.setdefault("predictions",[])
         r.setdefault("money_or_conflict_signals",[])
@@ -84,7 +85,7 @@ def main():
     write_jsonl(reviews_path,ordered)
 
     fact_checks=load_jsonl_map(ad/"fact_checks.jsonl","claim_id")
-    claims=[]; mentions=[]; relationships=[]; products=[]; predictions=[]; money=[]; citations=[]
+    claims=[]; mentions=[]; relationships=[]; stances=[]; products=[]; predictions=[]; money=[]; citations=[]
 
     for uid,r in reviews.items():
         u=unit_map[uid]
@@ -124,6 +125,28 @@ def main():
                 "subject_entity_id":rel.get("subject_entity_id",""),"object_entity_id":rel.get("object_entity_id",""),
                 "relationship_type":rel.get("relationship_type",""),"description":desc,
                 "confidence":rel.get("confidence",""),"source_path":u["source_path"]
+            })
+
+        for st in r.get("stances") or []:
+            target_entity_id=st.get("target_entity_id","")
+            target_claim_id=st.get("target_claim_id","")
+            stance_type=(st.get("stance_type") or "").upper()
+            topic=norm(st.get("topic") or "")
+            excerpt=norm(st.get("excerpt") or st.get("text") or "")
+            if not stance_type or not (target_entity_id or target_claim_id):
+                continue
+            stances.append({
+                "stance_event_id":st.get("stance_event_id") or sid(
+                    "ST_",uid,target_entity_id,target_claim_id,stance_type,topic,excerpt
+                ),
+                "unit_id":uid,"content_id":u["content_id"],"start_seconds":u["start_seconds"],
+                "end_seconds":u["end_seconds"],"speaker_id":u["speaker_id"],
+                "source_entity_id":st.get("source_entity_id") or r.get("speaker_entity_id",""),
+                "target_entity_id":target_entity_id,"target_claim_id":target_claim_id,
+                "stance_type":stance_type,"topic":topic,"excerpt":excerpt,
+                "speaker_adoption":(st.get("speaker_adoption") or "ADOPTS").upper(),
+                "explicitness":(st.get("explicitness") or "EXPLICIT").upper(),
+                "confidence":st.get("confidence",""),"source_path":u["source_path"]
             })
 
         for p in r.get("products") or []:
@@ -178,6 +201,11 @@ def main():
         "relationship_claim_id","unit_id","content_id","speaker_id","subject_entity_id","object_entity_id",
         "relationship_type","description","confidence","source_path"
     ])
+    write_csv(ad/"stance_events.csv",stances,[
+        "stance_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id",
+        "source_entity_id","target_entity_id","target_claim_id","stance_type","topic","excerpt",
+        "speaker_adoption","explicitness","confidence","source_path"
+    ])
     write_csv(ad/"product_mentions.csv",products,[
         "product_mention_id","unit_id","content_id","speaker_id","name","product_id","role","price","cta","sponsor",
         "affiliate_or_promo","source_path"
@@ -227,7 +255,7 @@ def main():
     print(json.dumps({
         "accepted_reviews":accepted,"total_reviews":len(reviews),"claims":len(claims),
         "fact_checks_pending":len(unresolved),"mentions":len(mentions),"relationships":len(relationships),
-        "products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
+        "stances":len(stances),"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
     },indent=2))
     return 0
 
