@@ -56,7 +56,7 @@ def main():
     args=ap.parse_args()
 
     ad=Path(args.analysis_dir).resolve()
-    repo_root=ad.parents[1] if len(ad.parents)>=2 else Path.cwd()
+    repo_root=Path(__file__).resolve().parents[1]
     ontology_path=(repo_root/args.ontology).resolve() if not Path(args.ontology).is_absolute() else Path(args.ontology)
     ontology_rows=list(csv.DictReader(ontology_path.open(encoding="utf-8-sig")))
     ontology={r["predicate_code"]:r for r in ontology_rows}
@@ -377,7 +377,6 @@ def main():
 
     voice_identity_sync={"attempted":False}
     if not args.skip_voice_identity_sync and identity_clues and identity_clues_path.exists():
-        repo_root=ad.parents[1] if len(ad.parents)>=2 else Path.cwd()
         voice_db=repo_root/"research"/"audio_identity"/"voice_identity.sqlite"
         identity_script=repo_root/"scripts"/"audio_identity_db.py"
         if voice_db.exists() and identity_script.exists():
