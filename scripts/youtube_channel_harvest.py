@@ -167,7 +167,13 @@ def write_status(base,results):
     with (base/"needs_transcription.csv").open("w",newline="",encoding="utf-8-sig") as f:
         fields2=["video_id","url","title","channel_name","reason"]; w=csv.DictWriter(f,fieldnames=fields2); w.writeheader()
         for r in results:
-            if r.get("status")!="captioned": w.writerow({"video_id":r.get("video_id",""),"url":r.get("url",""),"title":r.get("title",""),"channel_name":r.get("channel_name",""),"reason":r.get("status","")})
+            if r.get("status")=="needs_transcription":
+                w.writerow({"video_id":r.get("video_id",""),"url":r.get("url",""),"title":r.get("title",""),"channel_name":r.get("channel_name",""),"reason":r.get("status","")})
+    with (base/"acquisition_failures.csv").open("w",newline="",encoding="utf-8-sig") as f:
+        fields3=["video_id","url","title","channel_name","status","error"]; w=csv.DictWriter(f,fieldnames=fields3); w.writeheader()
+        for r in results:
+            if r.get("status") in {"metadata_failed","caption_download_failed","exception"}:
+                w.writerow({k:r.get(k,"") for k in fields3})
 
 def main():
     ap=argparse.ArgumentParser(description="Inventory a YouTube channel and harvest existing captions without downloading media.")
@@ -225,7 +231,7 @@ def main():
     manifest["completed_at"]=now()
     manifest["status"]="complete"
     manifest["result_counts"]=counts
-    manifest["output_files"]=["inventory.csv","inventory.jsonl","inventory_summary.json","caption_status.csv","needs_transcription.csv"]
+    manifest["output_files"]=["inventory.csv","inventory.jsonl","inventory_summary.json","caption_status.csv","needs_transcription.csv","acquisition_failures.csv"]
     (base/"run_manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
     print(f"[done] {base/'caption_status.csv'}",flush=True)
     print(f"[queue] {base/'needs_transcription.csv'}",flush=True)
