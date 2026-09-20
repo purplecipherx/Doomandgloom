@@ -22,6 +22,10 @@ def run(args, timeout=1800):
         timeout=timeout,
     )
 
+def ytdlp_version():
+    p=run(["--version"], timeout=30)
+    return p.stdout.strip() if p.returncode==0 else "unknown"
+
 def sha256(path: Path):
     h=hashlib.sha256()
     with path.open("rb") as f:
@@ -43,6 +47,19 @@ def main():
     rows=list(csv.DictReader(queue.open(encoding="utf-8-sig")))
     if args.limit>0: rows=rows[:args.limit]
 
+    run_record={
+        "run_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"_audio_fallback",
+        "started_at": now(),
+        "queue_csv": str(queue),
+        "output_dir": str(base),
+        "python_version": sys.version,
+        "yt_dlp_version": ytdlp_version(),
+        "argv": sys.argv,
+        "queued_count": len(rows),
+        "format_rule": "bestaudio only; no video fallback"
+    }
+    (base/"run_manifest.json").write_text(json.dumps(run_record,indent=2),encoding="utf-8")
+
     manifest=[]
     for i,row in enumerate(rows,1):
         vid=row["video_id"]; url=row["url"]
@@ -52,7 +69,6 @@ def main():
             "--no-playlist",
             "-f","bestaudio",
             "--write-info-json",
-            "--write-thumbnail",
             "--no-write-comments",
             "-o",outtmpl,
             url
@@ -84,6 +100,11 @@ def main():
     with (base/"audio_manifest.jsonl").open("w",encoding="utf-8") as f:
         for r in manifest:
             f.write(json.dumps(r,ensure_ascii=False)+"\n")
+    run_record["completed_at"]=now()
+    run_record["status"]="complete"
+    run_record["downloaded_count"]=sum(1 for r in manifest if r["status"]=="downloaded")
+    run_record["failed_count"]=sum(1 for r in manifest if r["status"]=="failed")
+    (base/"run_manifest.json").write_text(json.dumps(run_record,indent=2),encoding="utf-8")
 
 if __name__=="__main__":
     main()
