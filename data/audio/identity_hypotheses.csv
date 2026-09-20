@@ -1,0 +1,1 @@
+hypothesis_id,cluster_observation_id,candidate_entity_id,candidate_name,context_score,acoustic_score,combined_score,evidence_count,independent_content_count,direct_evidence_count,status,created_at,updated_at,notes
