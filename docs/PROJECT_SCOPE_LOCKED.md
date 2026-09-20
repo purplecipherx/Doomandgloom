@@ -894,3 +894,43 @@ It should be able to show, where supported:
 **who said what → what evidence existed → what they sold → who owned/made it → who got paid → what conflicts were disclosed → whether the claim/product held up → how the story changed over time.**
 
 That is now the locked publication standard.
+
+
+---
+
+# Network-wide scope clarification — locked
+
+Doomandgloom is **not a Catherine Austin Fitts / Martin Armstrong project**.
+
+They are seed nodes only.
+
+Any person, company, nonprofit, media platform, conference, product, sponsor, manufacturer, researcher, funder, advertiser, investment vehicle, distributor, affiliate, or recurring collaborator becomes part of scope when a documented relationship connects it to the network.
+
+## Expansion rule
+
+A new entity enters the research graph when at least one of the following is documented:
+
+- formal employment / ownership / board relationship
+- money flow
+- product ownership or manufacturing
+- affiliate/referral relationship
+- sponsorship
+- recurring cross-promotion
+- recurring media appearances
+- recurring conference appearances
+- shared research funding
+- shared legal/PR/marketing infrastructure
+- shared commercial vendor
+- audience-transfer relationship
+- repeated claim propagation
+- securities / investment relationship
+- nonprofit / grant relationship
+- related-party transaction
+
+Single interviews or one-off conference appearances remain weak ties unless strengthened by additional evidence.
+
+## Research objective
+
+The project should discover the network **outward from every node**, not merely outward from the original seeds.
+
+Every newly discovered hub can spawn another discovery pass.
