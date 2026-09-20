@@ -62,13 +62,17 @@ def main():
     ).fetchall()
     c.close()
 
+    resolution=load_resolution(Path(args.speaker_resolution).resolve(),args.channel_id,moji) if args.speaker_resolution else {}
+
     samples_by_video=defaultdict(list)
     for r in rows:
         meta=by_clip.get(str(Path(r["path"]).resolve()))
         if not meta: continue
         gid=clean(r["global_speaker_id"]) or clean(r["local_speaker"])
+        rr=resolution.get(gid,{})
+        voice_key=clean(rr.get("canonical_voice_id")) or gid
         samples_by_video[clean(meta.get("video_id"))].append({
-            "gid":gid,
+            "gid":gid,"voice_key":voice_key,
             "cue_index":int(meta.get("cue_index") or 0),
             "start":float(meta.get("start_seconds") or 0),
             "end":float(meta.get("end_seconds") or 0),
@@ -80,7 +84,6 @@ def main():
         })
     for v in samples_by_video.values(): v.sort(key=lambda x:x["center"])
 
-    resolution=load_resolution(Path(args.speaker_resolution).resolve(),args.channel_id,moji) if args.speaker_resolution else {}
     output=[]
     for cap in sorted(normalized.glob("*.segments.jsonl")):
         vid=cap.name[:-len(".segments.jsonl")]
@@ -99,9 +102,9 @@ def main():
                 candidates=[nearest]
                 if int(nearest["cue_index"])==cue_index:
                     gid=nearest["gid"]; status="ATTRIBUTED_HIGH"; method="sparse_exact_sample"
-                elif before and after and before["gid"]==after["gid"] and                      abs(center-before["center"])<=args.bracket_max_distance and                      abs(after["center"]-center)<=args.bracket_max_distance:
+                elif before and after and before["voice_key"]==after["voice_key"] and                      abs(center-before["center"])<=args.bracket_max_distance and                      abs(after["center"]-center)<=args.bracket_max_distance:
                     gid=before["gid"]; status="ATTRIBUTED_HIGH"; method="sparse_same_voice_bracket"; candidates=[before,after]
-                elif before and after and before["gid"]!=after["gid"] and before["sample_id"]!=after["sample_id"]:
+                elif before and after and before["voice_key"]!=after["voice_key"] and before["sample_id"]!=after["sample_id"]:
                     status="AMBIGUOUS"; method="sparse_conflicting_bracket"; candidates=[before,after]
                 elif nd<=args.medium_max_distance:
                     gid=nearest["gid"]; status="ATTRIBUTED_MEDIUM"; method="sparse_nearest"
