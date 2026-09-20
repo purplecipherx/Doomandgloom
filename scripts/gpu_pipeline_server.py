@@ -97,15 +97,22 @@ def load_moji(moji_root:Path):
 
 def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
     p=json.loads(job["payload_json"])
-    if job["kind"] not in {"gpu_moji_channel","gpu_voice_index_channel"}:
+    if job["kind"] not in {"gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch"}:
         raise RuntimeError(f"unsupported GPU job kind: {job['kind']}")
 
     channel_root=repo/"research"/"youtube"/p["name"]
     voice_only = job["kind"]=="gpu_voice_index_channel"
-    audio_dir=channel_root/("voice_audio" if voice_only else "audio_fallback")
-    audio_manifest=audio_dir/"audio_manifest.jsonl"
-    moji_out=channel_root/("voice_index_work" if voice_only else "moji_work")
-    research_out=channel_root/"diarized_transcripts"
+    batch_mode = job["kind"]=="gpu_moji_batch"
+    if batch_mode:
+        audio_dir=Path(p["audio_batch_dir"])
+        audio_manifest=Path(p["audio_manifest_path"])
+        moji_out=Path(p["moji_output_path"])
+        research_out=Path(p["research_output_path"])
+    else:
+        audio_dir=channel_root/("voice_audio" if voice_only else "audio_fallback")
+        audio_manifest=audio_dir/"audio_manifest.jsonl"
+        moji_out=channel_root/("voice_index_work" if voice_only else "moji_work")
+        research_out=channel_root/"diarized_transcripts"
     logs=repo/"research"/"runtime"/"logs"
     log_path=logs/f"job_{job['id']}_gpu_moji.log"
     log_path.parent.mkdir(parents=True,exist_ok=True)
@@ -145,7 +152,8 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
         next_key=f"captionvoice:{cid}:{gen}"
     else:
         next_kind="audio_identity_sync"
-        next_key=f"voice:{cid}:{gen}"
+        batch_suffix=f":{p.get('batch_id')}" if p.get("batch_id") else ""
+        next_key=f"voice:{cid}:{gen}{batch_suffix}"
     enqueue(
         hub,kind=next_kind,lane="cpu",payload=p,
         job_key=next_key,priority=15,max_attempts=3
@@ -182,7 +190,7 @@ def main():
     try:
         while True:
             try:
-                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel","gpu_voice_index_channel"],lease_seconds=args.lease_seconds)
+                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch"],lease_seconds=args.lease_seconds)
             except Exception:
                 time.sleep(args.poll); continue
             if not job:
