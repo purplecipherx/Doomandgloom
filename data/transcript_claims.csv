@@ -1,0 +1,1 @@
+transcript_claim_id,video_id,start_seconds,end_seconds,speaker_id,entity_id,claim_type,claim_text,claim_summary,product_id,price_mentioned,cta_present,fear_theme,confidence,verified_against_audio,source_ids,notes
