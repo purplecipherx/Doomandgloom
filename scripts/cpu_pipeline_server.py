@@ -51,7 +51,10 @@ class StatusAPI(BaseHTTPRequestHandler):
             self.send_response(404); self.end_headers(); return
         obj=self.state.snapshot(); obj["ok"]=True
         data=json.dumps(obj).encode("utf-8")
-        self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
+        try:
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
 def run_logged(cmd, log_path: Path, cwd: Path):
     log_path.parent.mkdir(parents=True,exist_ok=True)
