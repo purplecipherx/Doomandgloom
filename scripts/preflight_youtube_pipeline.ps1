@@ -77,6 +77,26 @@ if (-not (Test-Path $registry)) {
 
     $placeholders = $enabled | Where-Object { $_.youtube_url -match '@CHANNEL|example\.com|PLACEHOLDER' }
     if ($placeholders) { Fail "Placeholder URL exists in enabled registry" } else { Pass "No enabled placeholder URLs" }
+
+    $entitiesPath = Join-Path $repoRoot "data\entities.csv"
+    if (Test-Path $entitiesPath) {
+        $entityIds = @{}
+        foreach ($e in (Import-Csv $entitiesPath)) {
+            $eid = "$($e.id)".Trim()
+            if ($eid) { $entityIds[$eid] = $true }
+        }
+        $missingEntityIds = @($enabled | Where-Object {
+            $eid = "$($_.entity_id)".Trim()
+            $eid -and -not $entityIds.ContainsKey($eid)
+        })
+        if ($missingEntityIds.Count -gt 0) {
+            Fail ("Enabled YouTube registry references missing entity_id value(s): " + (($missingEntityIds | ForEach-Object entity_id) -join ", "))
+        } else {
+            Pass "All enabled YouTube registry entity IDs exist in data\entities.csv"
+        }
+    } else {
+        Fail "Canonical entity table missing: data\entities.csv"
+    }
 }
 
 # Captions need only Python/yt-dlp. Full mode additionally needs media + Moji.
