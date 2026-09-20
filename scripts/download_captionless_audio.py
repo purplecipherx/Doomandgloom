@@ -25,6 +25,7 @@ from pathlib import Path
 
 TARGET_KBPS = 128
 DEFAULT_WORKERS = 4
+YOUTUBE_FALLBACK_CLIENTS = "default,web_embedded"
 AUDIO_EXTENSIONS = {".opus", ".m4a", ".mp3", ".aac", ".ogg", ".wav", ".flac", ".webm"}
 
 def now():
@@ -84,29 +85,33 @@ def any_media_file(vdir: Path):
     ]
     return max(candidates, key=lambda x: x.stat().st_size) if candidates else None
 
-def download_audio_only(url: str, outtmpl: str):
-    return run([
+def download_audio_only(url: str, outtmpl: str, fallback_clients=False):
+    args=[
         "--no-playlist",
         "-f", "bestaudio",
         "-S", f"abr~{TARGET_KBPS}",
         "--format-sort-force",
         "--write-info-json",
         "--no-write-comments",
-        "-o", outtmpl,
-        url,
-    ])
+    ]
+    if fallback_clients:
+        args += ["--extractor-args", f"youtube:player_client={YOUTUBE_FALLBACK_CLIENTS}"]
+    args += ["-o", outtmpl, url]
+    return run(args)
 
-def download_muxed_fallback(url: str, outtmpl: str):
-    return run([
+def download_muxed_fallback(url: str, outtmpl: str, fallback_clients=True):
+    args=[
         "--no-playlist",
         "-f", "best[acodec!=none][vcodec!=none]",
         "-S", f"abr~{TARGET_KBPS},+size,+res,+br",
         "--format-sort-force",
         "--write-info-json",
         "--no-write-comments",
-        "-o", outtmpl,
-        url,
-    ])
+    ]
+    if fallback_clients:
+        args += ["--extractor-args", f"youtube:player_client={YOUTUBE_FALLBACK_CLIENTS}"]
+    args += ["-o", outtmpl, url]
+    return run(args)
 
 def normalize_to_128k(source: Path, output: Path):
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -182,12 +187,21 @@ def process_one(index: int, row: dict, queue: Path, base: Path):
                 pass
 
     mode = "audio_only"
-    p = download_audio_only(url, outtmpl)
+    attempts=[]
+    p = download_audio_only(url, outtmpl, fallback_clients=False)
+    attempts.append({"mode":"audio_only_default","returncode":p.returncode,"stderr_tail":p.stderr[-1200:]})
     source_media = final_audio_file(vdir)
 
     if not source_media:
+        mode = "audio_only_client_fallback"
+        p = download_audio_only(url, outtmpl, fallback_clients=True)
+        attempts.append({"mode":"audio_only_client_fallback","returncode":p.returncode,"stderr_tail":p.stderr[-1200:]})
+        source_media = final_audio_file(vdir)
+
+    if not source_media:
         mode = "muxed_video_fallback"
-        p = download_muxed_fallback(url, outtmpl)
+        p = download_muxed_fallback(url, outtmpl, fallback_clients=True)
+        attempts.append({"mode":"muxed_video_fallback","returncode":p.returncode,"stderr_tail":p.stderr[-1200:]})
         source_media = any_media_file(vdir)
 
     info, info_path = info_json_for(vdir, vid)
@@ -243,6 +257,7 @@ def process_one(index: int, row: dict, queue: Path, base: Path):
         ),
         "ffmpeg_error": ffmpeg_error,
         "stderr_tail": p.stderr[-1200:],
+        "attempts": attempts,
         "_queue_index": index,
     }
     (vdir / "audio_manifest.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
@@ -319,6 +334,10 @@ def main():
                     f"{rec['status']} mode={rec.get('acquisition_mode','')} target={TARGET_KBPS}kbps",
                     flush=True,
                 )
+                if rec.get("status") not in {"downloaded","cached"}:
+                    tail=(rec.get("stderr_tail") or "").strip().replace("\\n"," | ")
+                    if tail:
+                        print(f"        stderr: {tail[-500:]}", flush=True)
 
     manifest.sort(key=lambda r: r.get("_queue_index", 10**9))
     for rec in manifest:
