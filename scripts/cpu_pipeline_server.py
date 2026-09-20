@@ -101,14 +101,16 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         if code: raise RuntimeError(f"harvest exit code {code}")
         queue_spider(hub,payload,"captions")
         enqueue(hub,kind="prepare_audio",lane="cpu",payload=payload,job_key=f"audio:{payload['channel_id']}:{payload['generation']}",priority=5)
-        enqueue(hub,kind="prepare_voice_audio",lane="cpu",payload=payload,job_key=f"voiceaudio:{payload['channel_id']}:{payload['generation']}",priority=8)
-        return {"exit_code":0,"channel_root":str(channel_root)}
+        if not bool(payload.get("force_whisper_all",False)):
+            enqueue(hub,kind="prepare_voice_audio",lane="cpu",payload=payload,job_key=f"voiceaudio:{payload['channel_id']}:{payload['generation']}",priority=8)
+        return {"exit_code":0,"channel_root":str(channel_root),"force_whisper_all":bool(payload.get("force_whisper_all",False))}
 
     if kind=="prepare_audio":
-        queue=channel_root/"needs_transcription.csv"
+        force_all=bool(payload.get("force_whisper_all",False))
+        queue=channel_root/("inventory.csv" if force_all else "needs_transcription.csv")
         script=repo/"scripts"/"download_captionless_audio.py"
         cmd=[str(ytpy),str(script),str(queue),"--workers",str(payload.get("audio_workers",audio_workers))]
-        if int(payload.get("captionless_limit",0) or 0)>0:
+        if (not force_all) and int(payload.get("captionless_limit",0) or 0)>0:
             cmd += ["--limit",str(payload["captionless_limit"])]
         with AUDIO_SEM:
             code=run_logged(cmd,logs/f"job_{job['id']}_audio.log",repo)
