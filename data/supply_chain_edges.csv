@@ -1,0 +1,1 @@
+supply_edge_id,product_id,supplier_entity_id,customer_entity_id,component_or_service,relationship_type,country_from,country_to,date_start,date_end,evidence_type,source_url,archive_url,source_ids,confidence,status,notes
