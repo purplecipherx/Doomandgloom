@@ -8,7 +8,12 @@ param(
     [int]$Limit = 0,
     [switch]$InventoryOnly,
     [switch]$ProcessCaptionless,
-    [string]$MojiRoot = ""
+    [string]$MojiRoot = "",
+    [ValidateSet("cuda","cpu")]
+    [string]$Device = "cuda",
+    [string]$WhisperModel = "medium.en",
+    [string]$ComputeType = "int8",
+    [int]$BatchSize = 4
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,7 +54,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($InventoryOnly) {
     Write-Host ""
-    Write-Host "Inventory complete. No captions, audio, or diarization were run."
+    Write-Host "Inventory complete. No captions, audio, diarization, or transcription were run."
     exit 0
 }
 
@@ -57,7 +62,7 @@ if (-not $ProcessCaptionless) {
     Write-Host ""
     Write-Host "Caption harvest complete."
     Write-Host "Captionless queue: $(Join-Path $channelOut 'needs_transcription.csv')"
-    Write-Host "Rerun with -ProcessCaptionless to use audio-only + M0J1M0J1."
+    Write-Host "Rerun with -ProcessCaptionless for audio-only + M0J1M0J1 diarization/transcription."
     exit 0
 }
 
@@ -74,7 +79,9 @@ if (-not $MojiRoot) {
     }
 }
 
-if (-not $MojiRoot) { throw "Could not find M0J1M0J1_GPU or M0J1M0J1 with voice_harvest.py." }
+if (-not $MojiRoot) {
+    throw "Could not find M0J1M0J1_GPU or M0J1M0J1 with voice_harvest.py."
+}
 
 $queue = Join-Path $channelOut "needs_transcription.csv"
 $audioScript = Join-Path $PSScriptRoot "download_captionless_audio.py"
@@ -82,8 +89,11 @@ $audioScript = Join-Path $PSScriptRoot "download_captionless_audio.py"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $audioDir = Join-Path $channelOut "audio_fallback"
-$audioFiles = Get-ChildItem $audioDir -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.(m4a|webm|opus|mp3|wav|aac|ogg|flac)$" }
-if (-not $audioFiles) {
+$audioManifest = Join-Path $audioDir "audio_manifest.jsonl"
+$audioFiles = Get-ChildItem $audioDir -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -match "^\.(m4a|webm|opus|mp3|wav|aac|ogg|flac)$" }
+
+if (-not $audioFiles -or $audioFiles.Count -eq 0) {
     Write-Host "No captionless audio requires Moji processing."
     exit 0
 }
@@ -97,20 +107,51 @@ $mojiPython = $null
 foreach ($candidate in $mojiPythonCandidates) {
     if (Test-Path $candidate) { $mojiPython = $candidate; break }
 }
-if (-not $mojiPython) { throw "Moji voice-harvester venv not found." }
+if (-not $mojiPython) {
+    throw "Moji voice-harvester venv not found. Run voice_harvester\install_windows.ps1 in M0J1M0J1 first."
+}
+
+if (-not $env:HF_TOKEN -and -not $env:HUGGINGFACE_TOKEN) {
+    throw "HF_TOKEN or HUGGINGFACE_TOKEN must be set for pyannote Community-1."
+}
 
 $mojiOut = Join-Path $channelOut "moji_work"
 $voiceHarvest = Join-Path $MojiRoot "voice_harvest.py"
 
 Write-Host ""
-Write-Host "Using Moji: $MojiRoot"
-Write-Host "Audio only: $audioDir"
+Write-Host "=== M0J1M0J1 FALLBACK ==="
+Write-Host "Moji root: $MojiRoot"
+Write-Host "Audio-only source: $audioDir"
+Write-Host ""
 
 & $mojiPython $voiceHarvest scan --input $audioDir --output $mojiOut --hash sha256
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $mojiPython $voiceHarvest diarize --output $mojiOut --device cuda
+
+& $mojiPython $voiceHarvest diarize --output $mojiOut --device $Device
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $mojiPython $voiceHarvest embed --output $mojiOut --embed-device cpu
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $mojiPython $voiceHarvest cluster --output $mojiOut --threshold 0.68
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $mojiPython $voiceHarvest extract --output $mojiOut
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $mojiPython $voiceHarvest transcribe --output $mojiOut --device $Device --whisper-model $WhisperModel --compute-type $ComputeType --batch-size $BatchSize
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$bridge = Join-Path $PSScriptRoot "import_moji_research_transcripts.py"
+$researchOut = Join-Path $channelOut "diarized_transcripts"
+
+& $harvestPython $bridge --moji-output $mojiOut --audio-manifest $audioManifest --output $researchOut
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Moji diarization complete: $mojiOut"
-Write-Host "Transcription/attribution import is the next stage."
+Write-Host "=== COMPLETE ==="
+Write-Host "Inventory:           $(Join-Path $channelOut 'inventory.csv')"
+Write-Host "Caption status:      $(Join-Path $channelOut 'caption_status.csv')"
+Write-Host "Captionless queue:   $queue"
+Write-Host "Moji work/audit:     $mojiOut"
+Write-Host "Diarized transcript: $(Join-Path $researchOut 'diarized_transcript.csv')"
