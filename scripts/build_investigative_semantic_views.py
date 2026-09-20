@@ -45,6 +45,10 @@ def main():
     ad=Path(args.analysis_dir).resolve()
     out=Path(args.output_dir).resolve()
     events=read_csv(ad/"semantic_events.csv")
+    transcript_units=read_csv(ad/"transcript_units.csv")
+    current_unit_ids={r.get("unit_id","") for r in transcript_units if r.get("source_status","CURRENT")=="CURRENT"}
+    if current_unit_ids:
+        events=[e for e in events if e.get("unit_id","") in current_unit_ids]
     verifications={r.get("semantic_event_id",""):r for r in read_csv(ad/"semantic_event_verifications.csv")}
     if not args.include_unverified_text_events:
         if verifications:
