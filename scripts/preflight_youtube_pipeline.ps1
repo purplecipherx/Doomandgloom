@@ -128,14 +128,14 @@ if ($Mode -eq "full") {
         if ($LASTEXITCODE -eq 0) {
             Pass "Hugging Face authentication available (environment or cached login)"
         } else {
-            Fail "No Hugging Face authentication found. Use the Moji venv and run: python -c \"from huggingface_hub import login; login()\""
+            Fail 'No Hugging Face authentication found. Use the Moji venv and run: python -c "from huggingface_hub import login; login()"'
         }
     } else {
         Fail "No .venv-voice-harvester found under either Moji tree"
         foreach ($m in $mojiCandidates) {
             $installer = Join-Path $m "voice_harvester\install_windows.ps1"
             if (Test-Path $installer) {
-                Warn "Bootstrap available: powershell.exe -ExecutionPolicy Bypass -File \"$installer\""
+                Warn ("Bootstrap available: powershell.exe -ExecutionPolicy Bypass -File `"{0}`"" -f $installer)
                 break
             }
         }
