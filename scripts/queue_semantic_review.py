@@ -23,36 +23,134 @@ def load_index(path: Path):
     return {r["unit_id"]: r for r in csv.DictReader(path.open(encoding="utf-8-sig"))}
 
 def load_caption_attributions(root: Path):
-    out = {}
+    exact = {}
+    by_video = {}
     if not root.exists():
-        return out
+        return {"exact": exact, "by_video": by_video}
     for p in root.rglob("caption_speaker_attribution.csv"):
         try:
-            rows = csv.DictReader(p.open(encoding="utf-8-sig"))
+            rows = list(csv.DictReader(p.open(encoding="utf-8-sig")))
             for r in rows:
                 vid = r.get("video_id", "")
                 try:
-                    st = round(float(r.get("start_seconds") or 0), 3)
-                    en = round(float(r.get("end_seconds") or 0), 3)
+                    st = float(r.get("start_seconds") or 0)
+                    en = float(r.get("end_seconds") or st)
                 except Exception:
                     continue
                 text_key = " ".join((r.get("text") or "").split()).lower()
-                out[(vid, st, en, text_key)] = r
+                exact[(vid, round(st,3), round(en,3), text_key)] = r
+                rr=dict(r); rr["_start"]=st; rr["_end"]=en
+                by_video.setdefault(vid,[]).append(rr)
         except Exception:
             continue
-    return out
+    for rows in by_video.values():
+        rows.sort(key=lambda r:(r["_start"],r["_end"]))
+    return {"exact": exact, "by_video": by_video}
+
+def _interval_union_length(intervals):
+    if not intervals:
+        return 0.0
+    xs=sorted((max(0.0,a),max(0.0,b)) for a,b in intervals if b>a)
+    if not xs:
+        return 0.0
+    total=0.0; cur_a,cur_b=xs[0]
+    for a,b in xs[1:]:
+        if a<=cur_b:
+            cur_b=max(cur_b,b)
+        else:
+            total+=cur_b-cur_a; cur_a,cur_b=a,b
+    total+=cur_b-cur_a
+    return total
 
 def attribution_for(row, attribution):
     try:
-        key = (
-            row.get("content_id", ""),
-            round(float(row.get("start_seconds") or 0), 3),
-            round(float(row.get("end_seconds") or 0), 3),
-            " ".join((row.get("text") or "").split()).lower(),
-        )
+        vid=row.get("content_id","")
+        st=float(row.get("start_seconds") or 0)
+        en=float(row.get("end_seconds") or st)
+        text_key=" ".join((row.get("text") or "").split()).lower()
     except Exception:
         return {}
-    return attribution.get(key, {})
+
+    exact=attribution.get("exact",{})
+    key=(vid,round(st,3),round(en,3),text_key)
+    if key in exact:
+        return exact[key]
+
+    candidates=attribution.get("by_video",{}).get(vid,[])
+    if not candidates:
+        return {}
+    duration=max(0.001,en-st)
+    scores={}
+    rep={}
+    coverage_intervals=[]
+    status_weight={"ATTRIBUTED_HIGH":1.0,"ATTRIBUTED_MEDIUM":0.8,"AMBIGUOUS":0.45,"NO_SPEECH_MATCH":0.0}
+
+    for a in candidates:
+        ast=float(a.get("_start") or 0); aen=float(a.get("_end") or ast)
+        ov=max(0.0,min(en,aen)-max(st,ast))
+        if ov<=0:
+            continue
+        coverage_intervals.append((max(st,ast)-st,min(en,aen)-st))
+        q=status_weight.get(a.get("speaker_attribution_status",""),0.6)
+        try:
+            raw_candidates=json.loads(a.get("candidate_speakers_json") or "[]")
+        except Exception:
+            raw_candidates=[]
+        if raw_candidates:
+            for c in raw_candidates:
+                spk=c.get("speaker_id","")
+                if not spk: continue
+                try: share=float(c.get("share") or 0)
+                except Exception: share=0.0
+                scores[spk]=scores.get(spk,0.0)+ov*max(0.0,share)*q
+                old=rep.get(spk)
+                if old is None or ov*q > old[0]:
+                    rep[spk]=(ov*q,a)
+        else:
+            spk=a.get("raw_speaker_id","")
+            if spk:
+                scores[spk]=scores.get(spk,0.0)+ov*q
+                old=rep.get(spk)
+                if old is None or ov*q > old[0]:
+                    rep[spk]=(ov*q,a)
+
+    if not scores:
+        return {}
+    ranked=sorted(scores.items(),key=lambda x:(-x[1],x[0]))
+    top_id,top_score=ranked[0]
+    total=sum(scores.values())
+    dominant=top_score/total if total>0 else 0.0
+    second=ranked[1][1]/total if len(ranked)>1 and total>0 else 0.0
+    coverage=min(1.0,_interval_union_length(coverage_intervals)/duration)
+    representative=(rep.get(top_id) or (0,{}))[1]
+
+    if coverage<0.35:
+        status="NO_SPEECH_MATCH"
+    elif dominant>=0.80 and second<=0.20:
+        status="ATTRIBUTED_HIGH"
+    elif dominant>=0.65 and second<=0.35:
+        status="ATTRIBUTED_MEDIUM"
+    else:
+        status="AMBIGUOUS"
+
+    out=dict(representative)
+    out.update({
+        "video_id":vid,
+        "start_seconds":st,
+        "end_seconds":en,
+        "text":row.get("text",""),
+        "raw_speaker_id":top_id,
+        "speaker_attribution_status":status,
+        "speaker_coverage_ratio":round(coverage,6),
+        "dominant_speaker_share":round(dominant,6),
+        "second_speaker_share":round(second,6),
+        "speaker_count":len(ranked),
+        "candidate_speakers_json":json.dumps([
+            {"speaker_id":spk,"share":round(score/total,6) if total else 0.0}
+            for spk,score in ranked
+        ],ensure_ascii=False),
+    })
+    return out
 
 def main():
     ap=argparse.ArgumentParser()
