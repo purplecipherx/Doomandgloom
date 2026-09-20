@@ -1,0 +1,1 @@
+referral_id,promoter_entity_id,merchant_entity_id,product_id,code_or_link,commission_rate_if_known,commission_amount_if_known,currency,date_observed,disclosure_present,disclosure_text,source_url,archive_url,source_ids,confidence,status,notes
