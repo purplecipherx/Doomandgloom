@@ -1,0 +1,1 @@
+propagation_edge_id,from_entity_id,to_entity_id,claim_id,first_from_time,first_to_time,lag_seconds,text_similarity,shared_source_lineage,documented_contact_between,source_ids,status,notes
