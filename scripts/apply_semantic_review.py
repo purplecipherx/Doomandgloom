@@ -163,6 +163,9 @@ def main():
                     object_entity_id,object_surface,raw_predicate,ev.get("topic","")
                 ),
                 "unit_id":uid,"content_id":u["content_id"],
+                "canonical_url":u.get("canonical_url",""),"title":u.get("title",""),
+                "published_at":u.get("published_at",""),"published_date":u.get("published_date",""),
+                "publication_precision":u.get("publication_precision","UNKNOWN"),
                 "start_seconds":u.get("start_seconds",""),"end_seconds":u.get("end_seconds",""),
                 "speaker_id":u.get("speaker_id",""),"canonical_voice_id":u.get("canonical_voice_id",""),
                 "reporting_entity_id":reporting_entity_id,"reporting_voice_id":reporting_voice_id,
@@ -202,7 +205,10 @@ def main():
             status=fc.get("status") or ("NOT_APPLICABLE" if checkability not in CHECKABLE else "PENDING")
             local_claim_id=c.get("local_claim_id") or c.get("claim_ref") or next((k for k,v in claim_ref_map.items() if v==cid),"")
             claims.append({
-                "claim_id":cid,"local_claim_id":local_claim_id,"unit_id":uid,"content_id":u["content_id"],"start_seconds":u["start_seconds"],"end_seconds":u["end_seconds"],
+                "claim_id":cid,"local_claim_id":local_claim_id,"unit_id":uid,"content_id":u["content_id"],
+                "canonical_url":u.get("canonical_url",""),"title":u.get("title",""),
+                "published_at":u.get("published_at",""),"published_date":u.get("published_date",""),
+                "start_seconds":u["start_seconds"],"end_seconds":u["end_seconds"],
                 "speaker_id":u["speaker_id"],"claim_text":text,"claim_type":c.get("claim_type","other"),
                 "checkability":checkability,"severity":(c.get("severity") or "LOW").upper(),
                 "target_entity_ids":json.dumps(c.get("target_entity_ids") or [],ensure_ascii=False),
@@ -316,7 +322,8 @@ def main():
             })
 
     write_csv(ad/"semantic_events.csv",semantic_events,[
-        "semantic_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","canonical_voice_id",
+        "semantic_event_id","unit_id","content_id","canonical_url","title","published_at","published_date","publication_precision",
+        "start_seconds","end_seconds","speaker_id","canonical_voice_id",
         "reporting_entity_id","reporting_voice_id","source_entity_id","source_surface","actor_resolution_status",
         "predicate_code","predicate_family","raw_predicate",
         "target_entity_id","target_surface","target_claim_id","related_claim_refs_json","related_claim_ids_json",
@@ -326,7 +333,8 @@ def main():
         "source_span_text","confidence","notes","source_path"
     ])
     write_csv(ad/"atomic_claims.csv",claims,[
-        "claim_id","local_claim_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","claim_text","claim_type",
+        "claim_id","local_claim_id","unit_id","content_id","canonical_url","title","published_at","published_date",
+        "start_seconds","end_seconds","speaker_id","claim_text","claim_type",
         "checkability","severity","target_entity_ids","claimant_entity_id","attribution_mode","requires_primary_source",
         "fact_check_status","source_path"
     ])
