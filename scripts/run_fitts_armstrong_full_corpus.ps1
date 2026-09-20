@@ -1,14 +1,18 @@
 param(
     [int]$CpuWorkers = 4,
     [int]$HarvestSlots = 2,
-    [int]$AudioSlots = 2,
+    [int]$AudioSlots = 1,
     [int]$CaptionWorkers = 8,
-    [int]$AudioWorkers = 4,
-    [int]$AudioBatchSize = 25,
+    [int]$AudioWorkers = 2,
+    [int]$AudioBatchSize = 10,
     [double]$Sleep = 0.75,
     [string]$WhisperModel = "medium.en",
     [string]$ComputeType = "int8",
     [int]$BatchSize = 4,
+    [string]$CookiesFromBrowser = "",
+    [double]$AudioSleepRequests = 1.5,
+    [double]$AudioSleepInterval = 2.0,
+    [double]$AudioMaxSleepInterval = 5.0,
     [switch]$SkipPreflight,
     [switch]$DoNotStartServers,
     [switch]$RestartServers,
@@ -119,6 +123,9 @@ $argsList = @(
     "--caption-workers", "$CaptionWorkers",
     "--audio-workers", "$AudioWorkers",
     "--audio-batch-size", "$AudioBatchSize",
+    "--audio-sleep-requests", "$AudioSleepRequests",
+    "--audio-sleep-interval", "$AudioSleepInterval",
+    "--audio-max-sleep-interval", "$AudioMaxSleepInterval",
     "--sleep", "$Sleep",
     "--device", "cuda",
     "--whisper-model", $WhisperModel,
@@ -128,6 +135,7 @@ $argsList = @(
 # No --limit-videos / --captionless-limit / --voice-index-limit: zero means unlimited.
 # Default for this special full-corpus launcher is literal full Whisper transcription.
 if (-not $PreferExistingCaptions) { $argsList += "--force-whisper-all" }
+if ($CookiesFromBrowser.Trim()) { $argsList += @("--cookies-from-browser",$CookiesFromBrowser.Trim()) }
 if ($Force) { $argsList += "--force" }
 
 & $python @argsList
