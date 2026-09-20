@@ -1,0 +1,1 @@
+revenue_id,entity_id,period_start,period_end,revenue_type,product_or_program_id,reported_amount,estimated_min,estimated_max,currency,gross_or_net,method,source_url,archive_url,source_ids,confidence,status,notes
