@@ -83,6 +83,7 @@ if ($Mode -eq "full") {
     if (Get-Command ffprobe -ErrorAction SilentlyContinue) { Pass "ffprobe found" } else { Fail "ffprobe not on PATH" }
 
     $mojiCandidates = @(
+        "$env:USERPROFILE\Desktop\M0J1M0J1_VOICE",
         "$env:USERPROFILE\Desktop\M0J1M0J1_GPU",
         "$env:USERPROFILE\Desktop\M0J1M0J1"
     )
@@ -101,7 +102,7 @@ if ($Mode -eq "full") {
         Pass "Moji source found: $voiceHarvestPath"
     } else {
         $mojiRoot = $null
-        Fail "No local voice_harvest.py found under M0J1M0J1_GPU or M0J1M0J1"
+        Fail "No local voice_harvest.py found under M0J1M0J1_VOICE, M0J1M0J1_GPU, or M0J1M0J1"
     }
 
     $mojiPython = $null
