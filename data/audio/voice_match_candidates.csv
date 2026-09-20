@@ -1,0 +1,1 @@
+candidate_id,left_cluster_observation_id,right_cluster_observation_id,cosine_similarity,same_channel,rank_left,rank_right,margin_left,margin_right,status,created_at,review_notes
