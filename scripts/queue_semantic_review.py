@@ -157,18 +157,36 @@ def main():
                     "context_before":neighbor_map.get(r["unit_id"],{}).get("context_before",[]),
                     "context_after":neighbor_map.get(r["unit_id"],{}).get("context_after",[]),
                     "review_required":{
+                        "ontology_path":"data/ontology/investigative_predicates.csv",
+                        "event_schema_path":"data/ontology/semantic_event_schema.json",
+                        "extract_semantic_events":True,
+                        "preserve_raw_predicate_phrase":True,
                         "classify_speech_act":True,
                         "extract_all_mentions":True,
+                        "resolve_fragmented_or_mistranscribed_names":True,
                         "extract_atomic_claims":True,
                         "extract_claims_about_people_or_orgs":True,
                         "extract_stances":True,
+                        "extract_rhetorical_devices_and_scare_tactics":True,
                         "extract_speaker_identity_clues":True,
-                        "extract_relationships":True,
+                        "extract_relationship_assertions_without_promoting_to_fact":True,
                         "extract_products_services_sponsors_ctas":True,
                         "extract_predictions":True,
                         "extract_money_conflict_signals":True,
                         "extract_citations_sources_mentioned":True,
-                        "fact_check_every_atomic_factual_claim":True
+                        "fact_check_every_atomic_factual_claim":True,
+                        "critical_errors_to_avoid":[
+                            "mention_to_relationship",
+                            "criticism_to_association",
+                            "quotation_to_speaker_belief",
+                            "allegation_to_fact",
+                            "negation_inversion",
+                            "wrong_claimant",
+                            "wrong_target",
+                            "recommendation_to_affiliate_relationship",
+                            "prediction_to_observed_event",
+                            "shared_target_to_coordination"
+                        ]
                     }
                 }
                 f.write(json.dumps(rec,ensure_ascii=False)+"\n")
