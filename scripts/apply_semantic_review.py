@@ -53,6 +53,7 @@ def main():
     ap.add_argument("--skip-voice-identity-sync",action="store_true")
     ap.add_argument("--ontology",default="data/ontology/investigative_predicates.csv")
     ap.add_argument("--skip-semantic-validation",action="store_true")
+    ap.add_argument("--allow-superseded",action="store_true")
     args=ap.parse_args()
 
     ad=Path(args.analysis_dir).resolve()
@@ -85,6 +86,8 @@ def main():
         uid=r.get("unit_id")
         if uid not in unit_map:
             raise SystemExit(f"Unknown unit_id in review: {uid}")
+        if not args.allow_superseded and unit_map[uid].get("source_status","CURRENT")!="CURRENT":
+            raise SystemExit(f"Refusing semantic review for superseded unit: {uid}")
         r["unit_id"]=uid
         r["reviewed_at"]=r.get("reviewed_at") or now()
         r["reviewer"]=r.get("reviewer") or args.reviewer
