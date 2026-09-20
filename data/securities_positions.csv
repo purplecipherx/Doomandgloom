@@ -1,0 +1,1 @@
+position_id,entity_id,security_ticker,issuer_name,position_type,long_short_put_call_other,beneficial_owner,broker_or_fund_if_known,open_date,close_date,size_shares,size_notional,currency,entry_price,exit_price,profit_loss_if_known,position_source,source_url,archive_url,source_ids,confidence,public_statement_linked,event_ids,status,notes
