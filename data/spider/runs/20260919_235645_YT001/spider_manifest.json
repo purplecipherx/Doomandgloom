@@ -1,0 +1,13 @@
+{
+  "batch_id": "20260919_235645_YT001",
+  "source_label": "YT001",
+  "created_at": "2026-09-20T07:01:11.243757+00:00",
+  "research_root": "C:\\Users\\cypher\\Desktop\\doomandgloom\\research\\youtube\\YT001",
+  "transcript_files_new": 91,
+  "transcript_files_skipped_already_processed": 5,
+  "segments_scanned": 11632,
+  "candidate_count_this_batch": 2042,
+  "master_candidate_count": 2081,
+  "mention_evidence_rows": 11632,
+  "known_aliases_loaded": 74
+}

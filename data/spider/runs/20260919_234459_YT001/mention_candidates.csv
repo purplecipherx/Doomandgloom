@@ -1,0 +1,65 @@
+﻿candidate_key,display_name,candidate_type,canonical_entity_id,mention_count,distinct_content_count,distinct_source_count,speaker_count,sample_content_id,sample_snippet,batch_id,source_label
+i m,I'm,named_entity,,18,2,2,0,p0jPh9KrCgc,"or do they? >> I I'm not sure that they do, but",20260919_234459_YT001,YT001
+it s,It's,named_entity,,13,4,4,0,37qD1Jj3NOc,>> Yeah. >> Right? It's just a distraction.,20260919_234459_YT001,YT001
+that s,That's,named_entity,,13,3,3,0,p0jPh9KrCgc,And so you they'll go behind your back or not. That's not a bad way to That's a,20260919_234459_YT001,YT001
+right,Right,named_entity,,12,2,2,0,DS3LfI1HbjI,hole. >> Right.,20260919_234459_YT001,YT001
+yeah,Yeah,named_entity,,9,3,3,0,37qD1Jj3NOc,this is a distraction. >> Yeah.,20260919_234459_YT001,YT001
+yep,Yep,named_entity,,9,1,1,0,RD8gcj5aP74,more energy than they draw out. >> Yep.,20260919_234459_YT001,YT001
+scotland,Scotland,named_entity,,8,1,1,0,37qD1Jj3NOc,Scotland and then Wales and Northern,20260919_234459_YT001,YT001
+wales,Wales,named_entity,,8,1,1,0,37qD1Jj3NOc,Scotland and then Wales and Northern,20260919_234459_YT001,YT001
+blackrock,BlackRock,named_entity,,6,1,1,0,p0jPh9KrCgc,"You know, but if you look at who owns their stock, it's BlackRock and Wall",20260919_234459_YT001,YT001
+here s,Here's,organization,,6,1,1,0,ZW6Lf7iQV3Q,viewed by Bloomberg News. Uh get this. Here's where you see the,20260919_234459_YT001,YT001
+campbell s,Campbell's,named_entity,,5,1,1,0,ZW6Lf7iQV3Q,Campbell's and Conagra warn higher food,20260919_234459_YT001,YT001
+turtle,Turtle,named_entity,,4,1,1,0,DS3LfI1HbjI,Turtle forth is about continuous,20260919_234459_YT001,YT001
+all of this is all the,all of this is all the,named_entity,,3,1,1,0,37qD1Jj3NOc,So what are they going to do? >> My problem with all of this is all the,20260919_234459_YT001,YT001
+birds eye,Birds Eye,person_or_named_entity,,3,1,1,0,ZW6Lf7iQV3Q,"meals and snacks. Uh Conagra, which makes Birds Eye frozen vegetables and",20260919_234459_YT001,YT001
+certainly,Certainly,named_entity,,3,1,1,0,p0jPh9KrCgc,of central control can happen. There's no Certainly can't hurt to put up,20260919_234459_YT001,YT001
+deming,Deming,named_entity,,3,1,1,0,RD8gcj5aP74,">> than they produce. You know, if you go to Wharton and you read Deming and",20260919_234459_YT001,YT001
+federal housing,Federal Housing,government,,3,1,1,0,RD8gcj5aP74,"I'll never forget when I first got to the Federal Housing Administration,",20260919_234459_YT001,YT001
+i d,I'd,named_entity,,3,1,1,0,DS3LfI1HbjI,"you know, clean second floor closet, let's say. I can do that. And I'd go",20260919_234459_YT001,YT001
+i ll,I'll,named_entity,,3,1,1,0,RD8gcj5aP74,them busy and keep them in the corner. I'll never forget when I first got to,20260919_234459_YT001,YT001
+i ve,I've,organization,,3,1,1,0,RD8gcj5aP74,it was the least productive culture and organization I've ever walked into.,20260919_234459_YT001,YT001
+i ve ever walked into,I've ever walked into,organization,,3,1,1,0,RD8gcj5aP74,it was the least productive culture and organization I've ever walked into.,20260919_234459_YT001,YT001
+in the secretary s office,in the secretary's office,product,,3,1,1,0,RD8gcj5aP74,"course, what's happening is I'm getting called in the secretary's office and",20260919_234459_YT001,YT001
+ireland,Ireland,named_entity,,3,1,1,0,37qD1Jj3NOc,there are first ministers in Scotland and Wales and in the north of Ireland,20260919_234459_YT001,YT001
+larry,Larry,named_entity,,3,1,1,0,DS3LfI1HbjI,"you get So, I tell the story, there's a commentary it's Larry called Turtle",20260919_234459_YT001,YT001
+let s,Let's,named_entity,,3,1,1,0,ZW6Lf7iQV3Q,little too busy. Let's go to the the companies.,20260919_234459_YT001,YT001
+marie callender,Marie Callender,person_or_named_entity,,3,1,1,0,ZW6Lf7iQV3Q,"makes Birds Eye frozen vegetables and Marie Callender meals,",20260919_234459_YT001,YT001
+mish,Mish,named_entity,,3,1,1,0,ZW6Lf7iQV3Q,prices are coming for the rest of the year. This is Mish.,20260919_234459_YT001,YT001
+or community,or community,organization,,3,1,1,0,RD8gcj5aP74,"I came to the conclusion that in any organization or community, 10% of the",20260919_234459_YT001,YT001
+right and,Right. And,person_or_named_entity,,3,1,1,0,RD8gcj5aP74,>> [laughter] >> Right. And what I discovered it was the,20260919_234459_YT001,YT001
+right do,Right. Do,person_or_named_entity,,3,1,1,0,RD8gcj5aP74,>> Right. >> Right. Do everything you can to keep,20260919_234459_YT001,YT001
+september,September,named_entity,,3,1,1,0,ZW6Lf7iQV3Q,"on a range of goods effective late September. So, we haven't seen these",20260919_234459_YT001,YT001
+there s,There's,named_entity,,3,1,1,0,p0jPh9KrCgc,"this could happen, you know, this kind of central control can happen. There's",20260919_234459_YT001,YT001
+they re,They're,named_entity,,3,1,1,0,RD8gcj5aP74,net energy plus people are being destroyed. They're,20260919_234459_YT001,YT001
+they ve,They've,named_entity,,3,1,1,0,37qD1Jj3NOc,Ireland. They have a memorandum of understanding. They've come to an,20260919_234459_YT001,YT001
+to basically be able,to basically be able,organization,,3,1,1,0,RD8gcj5aP74,slug in charge in a neighborhood or in an organization to basically be able to,20260919_234459_YT001,YT001
+united kingdom,United Kingdom,person_or_named_entity,,3,1,1,0,37qD1Jj3NOc,"who are all committed to independence from the United Kingdom. Hooray, hooray.",20260919_234459_YT001,YT001
+us since,US. Since,person_or_named_entity,,3,1,1,0,ZW6Lf7iQV3Q,Uh get this. Here's where you see the reality what's going on in the US. Since,20260919_234459_YT001,YT001
+wharton,Wharton,named_entity,,3,1,1,0,RD8gcj5aP74,">> than they produce. You know, if you go to Wharton and you read Deming and",20260919_234459_YT001,YT001
+you ve,You've,named_entity,,3,1,1,0,ZW6Lf7iQV3Q,instead of buying processed foods. You've got to know where your food comes,20260919_234459_YT001,YT001
+bloomberg news,Bloomberg News,organization,,2,1,1,0,ZW6Lf7iQV3Q,"price increases yet, according to memos viewed by Bloomberg News.",20260919_234459_YT001,YT001
+bud one,Bud. One,person_or_named_entity,,2,1,1,0,p0jPh9KrCgc,"Two questions for you, Bud. One of the",20260919_234459_YT001,YT001
+conagra,Conagra,named_entity,,2,1,1,0,ZW6Lf7iQV3Q,Campbell's and Conagra warn higher food,20260919_234459_YT001,YT001
+forth and,Forth. And,person_or_named_entity,,2,1,1,0,DS3LfI1HbjI,Forth. And I tell the story when things,20260919_234459_YT001,YT001
+ireland they,Ireland. They,person_or_named_entity,,2,1,1,0,37qD1Jj3NOc,Ireland. They have a memorandum of,20260919_234459_YT001,YT001
+it because,it because,person_or_named_entity,,2,1,1,0,p0jPh9KrCgc,other states that they get consumed with it because,20260919_234459_YT001,YT001
+street,Street,named_entity,,2,1,1,0,p0jPh9KrCgc,Street and,20260919_234459_YT001,YT001
+tennessee,Tennessee,named_entity,,2,1,1,0,p0jPh9KrCgc,was people from small and regional banks in Tennessee.,20260919_234459_YT001,YT001
+they ll,They'll,named_entity,,2,1,1,0,p0jPh9KrCgc,or not. That's not a bad way to That's a bad way to say it. They'll,20260919_234459_YT001,YT001
+two,Two,named_entity,,2,1,1,0,p0jPh9KrCgc,"Two questions for you, Bud. One of the",20260919_234459_YT001,YT001
+two uh,two uh,person_or_named_entity,,2,1,1,0,ZW6Lf7iQV3Q,by 4 to 5%. You can take that with two uh,20260919_234459_YT001,YT001
+wall,Wall,named_entity,,2,1,1,0,p0jPh9KrCgc,"You know, but if you look at who owns their stock, it's BlackRock and Wall",20260919_234459_YT001,YT001
+was required,was required,organization,,2,1,1,0,RD8gcj5aP74,>> [clears throat] >> section of the organization was required,20260919_234459_YT001,YT001
+bloomberg news uh,Bloomberg News. Uh,organization,,1,1,1,0,ZW6Lf7iQV3Q,viewed by Bloomberg News. Uh get this. Here's where you see the,20260919_234459_YT001,YT001
+inflation and then if you,inflation. And then if you,person_or_named_entity,,1,1,1,0,ZW6Lf7iQV3Q,>> That is going to be the way to deal with inflation. And then if you and your,20260919_234459_YT001,YT001
+it because the emergency,it because the emergency,person_or_named_entity,,1,1,1,0,p0jPh9KrCgc,that they get consumed with it because the emergency and the the 11th hour is,20260919_234459_YT001,YT001
+northern,Northern,named_entity,,1,1,1,0,37qD1Jj3NOc,Scotland and then Wales and Northern,20260919_234459_YT001,YT001
+northern ireland they,Northern Ireland. They,person_or_named_entity,,1,1,1,0,37qD1Jj3NOc,Scotland and then Wales and Northern Ireland. They have a memorandum of,20260919_234459_YT001,YT001
+tennessee you,Tennessee. You,person_or_named_entity,,1,1,1,0,p0jPh9KrCgc,"in Tennessee. You know, but if you look at who owns",20260919_234459_YT001,YT001
+they ll they,They'll They,person_or_named_entity,,1,1,1,0,p0jPh9KrCgc,bad way to say it. They'll They will maneuver around in these,20260919_234459_YT001,YT001
+turtle forth,Turtle Forth,person_or_named_entity,,1,1,1,0,DS3LfI1HbjI,commentary it's Larry called Turtle Forth. And I tell the story when things,20260919_234459_YT001,YT001
+turtle forth and,Turtle Forth. And,person_or_named_entity,,1,1,1,0,DS3LfI1HbjI,commentary it's Larry called Turtle Forth. And I tell the story when things,20260919_234459_YT001,YT001
+two uh processed packets of salt,two uh processed packets of salt,named_entity,,1,1,1,0,ZW6Lf7iQV3Q,4 to 5%. You can take that with two uh processed packets of salt.,20260919_234459_YT001,YT001
+wall street,Wall Street,person_or_named_entity,,1,1,1,0,p0jPh9KrCgc,"their stock, it's BlackRock and Wall Street and",20260919_234459_YT001,YT001
+was required by law,was required by law,organization,,1,1,1,0,RD8gcj5aP74,">> section of the organization was required by law to do, and how much capacity they",20260919_234459_YT001,YT001

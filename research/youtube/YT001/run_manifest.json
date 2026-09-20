@@ -1,0 +1,42 @@
+{
+  "run_id": "20260920T065700Z_YT001",
+  "started_at": "2026-09-20T06:57:00.481981+00:00",
+  "input_url": "https://www.youtube.com/@thesolarireport",
+  "source_name": "YT001",
+  "mode": "inventory_and_captions",
+  "python_version": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "yt_dlp_version": "2026.08.19",
+  "repo_git_commit": "dbdefd7682e4959295c26f4a04aa5dcf4348ff8c",
+  "argv": [
+    "C:\\Users\\cypher\\Desktop\\doomandgloom\\scripts\\youtube_channel_harvest.py",
+    "https://www.youtube.com/@thesolarireport",
+    "--output",
+    "C:\\Users\\cypher\\Desktop\\doomandgloom\\research\\youtube",
+    "--name",
+    "YT001",
+    "--workers",
+    "8",
+    "--sleep",
+    "0.75",
+    "--limit",
+    "100"
+  ],
+  "workers": 8,
+  "sleep_seconds": 0.75,
+  "language_regex": "en(?:[-_].*)?",
+  "limit": 100,
+  "inventory_count": 100,
+  "completed_at": "2026-09-20T06:57:00.841456+00:00",
+  "status": "complete",
+  "result_counts": {
+    "captioned": 95,
+    "caption_download_failed": 5
+  },
+  "output_files": [
+    "inventory.csv",
+    "inventory.jsonl",
+    "inventory_summary.json",
+    "caption_status.csv",
+    "needs_transcription.csv"
+  ]
+}
