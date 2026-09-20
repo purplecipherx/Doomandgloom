@@ -37,8 +37,9 @@ def main():
     index=load_index(index_path)
 
     rows=list(csv.DictReader(ledger.open(encoding="utf-8-sig")))
+    current_rows=[r for r in rows if r.get("source_status","CURRENT")=="CURRENT"]
     by_content={}
-    for r in rows:
+    for r in current_rows:
         by_content.setdefault(r["content_id"],[]).append(r)
     for content_rows in by_content.values():
         def _t(x):
@@ -53,7 +54,7 @@ def main():
                 "context_after":[x["text"] for x in content_rows[idx+1:idx+3]],
             }
 
-    pending=[r for r in rows if r.get("semantic_review_status")!="COMPLETE" and r["unit_id"] not in index]
+    pending=[r for r in current_rows if r.get("semantic_review_status")!="COMPLETE" and r["unit_id"] not in index]
 
     new_index=[]
     created=[]
