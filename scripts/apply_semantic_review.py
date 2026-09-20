@@ -146,6 +146,8 @@ def main():
                 "unit_id":uid,
                 "content_id":u["content_id"],
                 "channel_id":u.get("channel_id",""),
+                "start_seconds":u.get("start_seconds",""),
+                "end_seconds":u.get("end_seconds",""),
                 "target_acoustic_cluster_id":target_cluster,
                 "target_raw_speaker_id":target_raw,
                 "current_canonical_voice_id":u.get("canonical_voice_id",""),
@@ -234,7 +236,7 @@ def main():
         "relationship_type","description","confidence","source_path"
     ])
     write_csv(ad/"speaker_identity_clues.csv",identity_clues,[
-        "identity_clue_id","unit_id","content_id","channel_id","target_acoustic_cluster_id",
+        "identity_clue_id","unit_id","content_id","channel_id","start_seconds","end_seconds","target_acoustic_cluster_id",
         "target_raw_speaker_id","current_canonical_voice_id","current_resolved_entity_id",
         "claimed_entity_id","claimed_name","evidence_type","evidence_text","confidence",
         "speaker_adoption","source_path"
