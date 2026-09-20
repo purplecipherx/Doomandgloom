@@ -228,38 +228,157 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         if code:
             raise RuntimeError(f"voice index queue build exit code {code}")
 
-        voice_audio=channel_root/"voice_audio"
-        downloader=repo/"scripts"/"download_captionless_audio.py"
-        cmd=[str(ytpy),str(downloader),str(voice_queue),"--output-dir",str(voice_audio),
-             "--workers",str(payload.get("audio_workers",audio_workers))]
+        rows=list(csv.DictReader(voice_queue.open(encoding="utf-8-sig"))) if voice_queue.exists() else []
         if int(payload.get("voice_index_limit",0) or 0)>0:
-            cmd += ["--limit",str(payload["voice_index_limit"])]
-        with AUDIO_SEM:
-            code=run_logged(cmd,logs/f"job_{job['id']}_voice_audio.log",repo)
-        if code:
-            raise RuntimeError(f"captioned voice audio acquisition exit code {code}")
-
-        manifest=voice_audio/"audio_manifest.jsonl"
-        ready=0
-        if manifest.exists():
-            for line in manifest.read_text(encoding="utf-8",errors="replace").splitlines():
-                try:
-                    r=json.loads(line)
-                    if r.get("status") in ("downloaded","cached") and r.get("audio_path"):
-                        ready+=1
-                except Exception:
-                    pass
-        cid=payload["channel_id"]; gen=payload["generation"]
-        if ready:
+            rows=rows[:int(payload["voice_index_limit"])]
+        batch_size=max(1,int(payload.get("sparse_voice_batch_size",10) or 10))
+        batch_root=channel_root/"sparse_voice_batches"/payload["generation"]
+        batch_root.mkdir(parents=True,exist_ok=True)
+        queued=0
+        for start_idx in range(0,len(rows),batch_size):
+            batch_rows=rows[start_idx:start_idx+batch_size]
+            batch_id=f"VB{start_idx//batch_size+1:05d}"
+            work=batch_root/batch_id
+            work.mkdir(parents=True,exist_ok=True)
+            batch_queue=work/"queue.csv"
+            fields=list(batch_rows[0].keys()) if batch_rows else ["video_id","url","title","channel_name","reason"]
+            with batch_queue.open("w",newline="",encoding="utf-8-sig") as bf:
+                w=csv.DictWriter(bf,fieldnames=fields); w.writeheader(); w.writerows(batch_rows)
+            bp=dict(payload)
+            bp.update({
+                "batch_id":batch_id,
+                "sparse_voice_batch_queue":str(batch_queue),
+                "audio_batch_dir":str(work/"audio"),
+                "audio_manifest_path":str(work/"audio"/"audio_manifest.jsonl"),
+                "sparse_sample_root":str(work/"samples"),
+                "sparse_sample_dir":str(work/"samples"/"clips"),
+                "sample_manifest_path":str(work/"samples"/"sample_manifest.jsonl"),
+                "moji_output_path":str(work/"moji"),
+                "research_output_path":str(work/"attribution"),
+                "sparse_voice_batch_root":str(batch_root),
+                "sparse_voice_total_batches":(len(rows)+batch_size-1)//batch_size if rows else 0,
+                "defer_analysis":True,
+            })
             enqueue(
-                hub,kind="gpu_voice_index_channel",lane="gpu",payload=payload,
-                job_key=f"gpuvoice:{cid}:{gen}",priority=25,max_attempts=2
+                hub,kind="prepare_sparse_voice_batch",lane="cpu",payload=bp,
+                job_key=f"sparseaudio:{payload['channel_id']}:{payload['generation']}:{batch_id}",
+                priority=9,max_attempts=3
+            )
+            queued+=1
+        if not rows:
+            enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,
+                    job_key=f"analysis:nocaptionvoice:{payload['channel_id']}:{payload['generation']}",priority=30)
+        return {"exit_code":0,"sparse_voice_batches_queued":queued,"batch_size":batch_size,"video_count":len(rows)}
+
+    if kind=="prepare_sparse_voice_batch":
+        common_audio_args=[]
+        cookie_browser=str(payload.get("cookies_from_browser") or "").strip()
+        if cookie_browser:
+            common_audio_args += ["--cookies-from-browser",cookie_browser]
+        common_audio_args += [
+            "--sleep-requests",str(payload.get("audio_sleep_requests",1.5)),
+            "--sleep-interval",str(payload.get("audio_sleep_interval",2.0)),
+            "--max-sleep-interval",str(payload.get("audio_max_sleep_interval",5.0)),
+        ]
+        queue=Path(payload["sparse_voice_batch_queue"])
+        output_dir=Path(payload["audio_batch_dir"])
+        downloader=repo/"scripts"/"download_captionless_audio.py"
+        cmd=[str(ytpy),str(downloader),str(queue),"--output-dir",str(output_dir),
+             "--workers",str(payload.get("audio_workers",audio_workers)),*common_audio_args]
+        with AUDIO_SEM:
+            code=run_logged(cmd,logs/f"job_{job['id']}_sparse_audio.log",repo)
+        if code:
+            raise RuntimeError(f"sparse voice audio acquisition exit code {code}")
+
+        sample_root=Path(payload["sparse_sample_root"])
+        sampler=repo/"scripts"/"build_sparse_voice_samples.py"
+        code=run_logged([
+            str(ytpy),str(sampler),
+            "--normalized-dir",str(channel_root/"normalized"),
+            "--audio-manifest",str(payload["audio_manifest_path"]),
+            "--output",str(sample_root),
+            "--interval-seconds",str(payload.get("sparse_voice_interval_seconds",90)),
+            "--clip-seconds",str(payload.get("sparse_voice_clip_seconds",3.0)),
+            "--min-cue-seconds",str(payload.get("sparse_voice_min_cue_seconds",1.8)),
+            "--min-words",str(payload.get("sparse_voice_min_words",3)),
+            "--max-samples-per-video",str(payload.get("sparse_voice_max_samples_per_video",80)),
+        ],logs/f"job_{job['id']}_sparse_samples.log",repo)
+        if code:
+            raise RuntimeError(f"sparse voice sample extraction exit code {code}")
+
+        summary_path=sample_root/"sample_summary.json"
+        sample_count=0
+        if summary_path.exists():
+            try: sample_count=int(json.loads(summary_path.read_text(encoding="utf-8")).get("sample_count") or 0)
+            except Exception: pass
+        if sample_count:
+            enqueue(
+                hub,kind="gpu_sparse_voice_batch",lane="gpu",payload=payload,
+                job_key=f"gpusparse:{payload['channel_id']}:{payload['generation']}:{payload['batch_id']}",
+                priority=18,max_attempts=2
             )
         else:
-            # No captioned media in this harvest; do not block semantic analysis.
+            done=Path(payload["research_output_path"])/"identity_done.json"
+            done.parent.mkdir(parents=True,exist_ok=True)
+            done.write_text(json.dumps({"status":"no_samples","batch_id":payload["batch_id"]}),encoding="utf-8")
+        return {"exit_code":0,"batch_id":payload["batch_id"],"sample_count":sample_count}
+
+    if kind=="sparse_voice_identity_sync":
+        identity_script=repo/"scripts"/"audio_identity_db.py"
+        audio_manifest=Path(payload["audio_manifest_path"])
+        moji_out=Path(payload["moji_output_path"])
+        resolution=repo/"data"/"audio"/"speaker_resolution_current.csv"
+        matches=repo/"data"/"audio"/"voice_match_candidates.csv"
+        hypotheses=repo/"data"/"audio"/"identity_hypotheses.csv"
+        attribution_out=Path(payload["research_output_path"])
+        voice_log=logs/f"job_{job['id']}_sparse_voice_identity.log"
+
+        with VOICE_LOCK:
+            commands=[
+                [str(ytpy),str(identity_script),"ingest-audio","--manifest",str(audio_manifest),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"ingest-moji","--moji-output",str(moji_out),"--channel-id",payload["channel_id"]],
+                [str(ytpy),str(identity_script),"extract-exemplars","--moji-output",str(moji_out)],
+                [str(ytpy),str(identity_script),"match","--min-similarity",str(payload.get("voice_match_floor",0.58))],
+                [str(ytpy),str(identity_script),"export","--output",str(resolution)],
+                [str(ytpy),str(identity_script),"export-matches","--output",str(matches)],
+                [str(ytpy),str(identity_script),"export-hypotheses","--output",str(hypotheses)],
+            ]
+            for cmd in commands:
+                code=run_logged(cmd,voice_log,repo)
+                if code:
+                    raise RuntimeError(f"sparse voice identity stage failed exit={code}: {' '.join(cmd)}")
+
+            align=repo/"scripts"/"align_sparse_captions_to_speakers.py"
+            code=run_logged([
+                str(ytpy),str(align),
+                "--moji-output",str(moji_out),
+                "--sample-manifest",str(payload["sample_manifest_path"]),
+                "--normalized-dir",str(channel_root/"normalized"),
+                "--speaker-resolution",str(resolution),
+                "--channel-id",payload["channel_id"],
+                "--output",str(attribution_out),
+            ],voice_log,repo)
+            if code:
+                raise RuntimeError(f"sparse caption speaker alignment exit code {code}")
+
+        done=attribution_out/"identity_done.json"
+        done.write_text(json.dumps({"status":"done","batch_id":payload["batch_id"],"ts":now()}),encoding="utf-8")
+
+        batch_root=Path(payload["sparse_voice_batch_root"])
+        total=int(payload.get("sparse_voice_total_batches",0) or 0)
+        completed=len(list(batch_root.glob("VB*/attribution/identity_done.json")))
+        if total and completed>=total:
+            finalizer=repo/"scripts"/"finalize_sparse_voice_channel.py"
+            final_out=channel_root/"speaker_attribution"
+            code=run_logged([
+                str(ytpy),str(finalizer),"--batch-root",str(batch_root),"--output",str(final_out)
+            ],logs/f"job_{job['id']}_sparse_finalize.log",repo)
+            if code:
+                raise RuntimeError(f"sparse channel finalization exit code {code}")
+            cid=payload["channel_id"]; gen=payload["generation"]
             enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,
-                    job_key=f"analysis:nocaptionvoice:{cid}:{gen}",priority=30)
-        return {"exit_code":0,"voice_audio_ready":ready,"voice_queue":str(voice_queue)}
+                    job_key=f"analysis:sparsevoice:{cid}:{gen}",priority=30)
+        return {"exit_code":0,"batch_id":payload["batch_id"],"completed_batches":completed,"total_batches":total}
 
     if kind=="caption_voice_identity_sync":
         identity_script=repo/"scripts"/"audio_identity_db.py"
@@ -386,9 +505,9 @@ def worker_loop(index, args, repo, state):
     # harvest fan-out, spidering, identity sync, and analysis instead of
     # blocking behind the audio semaphore.
     if index == 1:
-        kinds=["harvest_channel","prepare_audio","prepare_audio_batch","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
+        kinds=["harvest_channel","prepare_audio","prepare_audio_batch","prepare_voice_audio","prepare_sparse_voice_batch","caption_voice_identity_sync","sparse_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
     else:
-        kinds=["harvest_channel","prepare_audio","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
+        kinds=["harvest_channel","prepare_audio","prepare_voice_audio","caption_voice_identity_sync","sparse_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
     while True:
         try:
             job=lease(args.hub,lane="cpu",worker=worker,kinds=kinds,lease_seconds=args.lease_seconds)
