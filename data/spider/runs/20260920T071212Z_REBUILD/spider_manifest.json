@@ -1,0 +1,19 @@
+{
+  "batch_id": "20260920T071212Z_REBUILD",
+  "source_label": "rebuild_all",
+  "created_at": "2026-09-20T07:12:12.872129+00:00",
+  "research_root": "C:\\Users\\cypher\\Desktop\\doomandgloom\\research\\youtube",
+  "transcript_files_new": 96,
+  "transcript_files_skipped_already_processed": 0,
+  "segments_scanned": 24776,
+  "candidate_count_this_batch": 1523,
+  "master_candidate_count": 1523,
+  "mention_evidence_rows": 6668,
+  "known_aliases_loaded": 74,
+  "priority_counts": {
+    "EXISTING": 5,
+    "HIGH": 48,
+    "MEDIUM": 289,
+    "LOW": 1181
+  }
+}

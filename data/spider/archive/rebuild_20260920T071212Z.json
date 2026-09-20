@@ -1,0 +1,15 @@
+{
+  "rebuild_id": "20260920T071212Z_REBUILD",
+  "started_at": "2026-09-20T07:12:12.245008+00:00",
+  "research_root": "C:\\Users\\cypher\\Desktop\\doomandgloom\\research\\youtube",
+  "output_dir": "C:\\Users\\cypher\\Desktop\\doomandgloom\\data\\spider",
+  "superseded_batches": [
+    "20260919_234459_YT001",
+    "20260919_235645_YT001"
+  ],
+  "processed_ledger_backup": "C:\\Users\\cypher\\Desktop\\doomandgloom\\data\\spider\\archive\\processed_transcripts_20260920T071212Z.csv",
+  "reason": "extractor_rules_rebuild",
+  "completed_at": "2026-09-20T07:12:14.363978+00:00",
+  "exit_code": 0,
+  "status": "complete"
+}

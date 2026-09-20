@@ -9,5 +9,8 @@
   "candidate_count_this_batch": 2042,
   "master_candidate_count": 2081,
   "mention_evidence_rows": 11632,
-  "known_aliases_loaded": 74
+  "known_aliases_loaded": 74,
+  "superseded": true,
+  "superseded_at": "2026-09-20T07:12:12.245008+00:00",
+  "superseded_reason": "extractor_rules_rebuild"
 }
