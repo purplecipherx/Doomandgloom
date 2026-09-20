@@ -57,6 +57,35 @@ def classify(name, ctx):
         return "website"
     return "person_or_named_entity" if 2 <= len(name.split()) <= 5 else "named_entity"
 
+
+def triage(canonical, candidate_type, mentions, content_count, speaker_count, signals):
+    signals = set(signals or [])
+    score = 0
+    if canonical:
+        score += 100
+    if candidate_type == "website":
+        score += 30
+    if "known" in signals:
+        score += 100
+    if "url" in signals:
+        score += 25
+    if "cue" in signals:
+        score += 25
+    if "proper_case" in signals:
+        score += 8
+    score += min(20, int(mentions) * 2)
+    score += min(30, int(content_count) * 5)
+    score += min(10, int(speaker_count) * 2)
+    if canonical:
+        priority = "EXISTING"
+    elif score >= 45:
+        priority = "HIGH"
+    elif score >= 25:
+        priority = "MEDIUM"
+    else:
+        priority = "LOW"
+    return score, priority
+
 def load_known(repo_root: Path):
     aliases = {}
     entities_path = repo_root / "data" / "entities.csv"
@@ -128,7 +157,7 @@ def extract_mentions(text, known):
     out = []
     occupied = []
 
-    def add(raw, typ, start, end, canonical=""):
+    def add(raw, typ, start, end, canonical="", signal="heuristic"):
         raw = clean(raw)
         if not raw or len(raw) < 3:
             return
@@ -138,7 +167,7 @@ def extract_mentions(text, known):
         sig = (key, start, end)
         if any(x[:3] == sig for x in out):
             return
-        out.append((key, raw, typ, start, end, canonical))
+        out.append((key, raw, typ, start, end, canonical, signal))
         occupied.append((start, end))
 
     # Known entities and aliases are matched case-insensitively, important for auto-captions.
@@ -153,11 +182,11 @@ def extract_mentions(text, known):
             left_ok = i == 0 or not low[i - 1].isalnum()
             right_ok = j == len(low) or not low[j].isalnum()
             if left_ok and right_ok:
-                add(display, typ, i, j, eid)
+                add(display, typ, i, j, eid, "known")
             pos = max(j, i + 1)
 
     for m in URL_RE.finditer(text):
-        add(m.group(0), "website", m.start(), m.end())
+        add(m.group(0), "website", m.start(), m.end(), "", "url")
 
     # Proper-name heuristic for punctuated/manual transcripts.
     for m in CAP_RE.finditer(text):
@@ -167,7 +196,7 @@ def extract_mentions(text, known):
             words = words[1:]
         raw = " ".join(words)
         if raw:
-            add(raw, None, m.start(), m.end())
+            add(raw, None, m.start(), m.end(), "", "proper_case")
 
     # Cue-based extraction also works on lowercase auto-captions.
     for m in CUE_RE.finditer(text):
@@ -181,7 +210,7 @@ def extract_mentions(text, known):
             kept.append(w)
         raw = " ".join(kept[:6])
         if raw:
-            add(raw, None, m.start(1), m.start(1) + len(raw))
+            add(raw, None, m.start(1), m.start(1) + len(raw), "", "cue")
 
     return out
 
@@ -234,12 +263,15 @@ def rebuild_master(out: Path, old_master):
             "first_batch_id": e.get("batch_id", ""),
             "last_batch_id": e.get("batch_id", ""),
             "canonical_entity_id": e.get("canonical_entity_id", ""),
+            "signals": set(),
         })
         r["mentions"] += 1
         r["contents"].add(e.get("content_id", ""))
         r["sources"].add(e.get("source_path", ""))
         if e.get("speaker"):
             r["speakers"].add(e["speaker"])
+        if e.get("signal"):
+            r["signals"].add(e["signal"])
         ts = e.get("processed_at") or ""
         if ts and (not r["first_seen_at"] or ts < r["first_seen_at"]):
             r["first_seen_at"] = ts
@@ -251,7 +283,8 @@ def rebuild_master(out: Path, old_master):
     fields = [
         "candidate_key","display_name","candidate_type","mention_count","distinct_content_count",
         "distinct_source_count","speaker_count","first_seen_at","last_seen_at","sample_content_id",
-        "sample_snippet","review_status","approved_entity_id","review_notes","first_batch_id","last_batch_id"
+        "sample_snippet","triage_score","review_priority","signal_types","review_status",
+        "approved_entity_id","review_notes","first_batch_id","last_batch_id"
     ]
     rows = []
     for key, s in stats.items():
@@ -259,25 +292,38 @@ def rebuild_master(out: Path, old_master):
         canonical = s.get("canonical_entity_id") or ""
         status = old.get("review_status") or ("existing" if canonical else "new")
         approved = old.get("approved_entity_id") or canonical
+        content_count = len({x for x in s["contents"] if x})
+        speaker_count = len(s["speakers"])
+        score, priority = triage(canonical, s["candidate_type"], s["mentions"], content_count, speaker_count, s["signals"])
         rows.append({
             "candidate_key": key,
             "display_name": s["display_name"],
             "candidate_type": s["candidate_type"],
             "mention_count": s["mentions"],
-            "distinct_content_count": len({x for x in s["contents"] if x}),
+            "distinct_content_count": content_count,
             "distinct_source_count": len({x for x in s["sources"] if x}),
-            "speaker_count": len(s["speakers"]),
+            "speaker_count": speaker_count,
             "first_seen_at": s["first_seen_at"],
             "last_seen_at": s["last_seen_at"],
             "sample_content_id": s["sample_content_id"],
             "sample_snippet": s["sample_snippet"],
+            "triage_score": score,
+            "review_priority": priority,
+            "signal_types": ";".join(sorted(s["signals"])),
             "review_status": status,
             "approved_entity_id": approved,
             "review_notes": old.get("review_notes", ""),
             "first_batch_id": s["first_batch_id"],
             "last_batch_id": s["last_batch_id"],
         })
-    rows.sort(key=lambda r: (-int(r["mention_count"]), -int(r["distinct_content_count"]), r["display_name"].lower()))
+    priority_order = {"EXISTING": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    rows.sort(key=lambda r: (
+        priority_order.get(r["review_priority"], 9),
+        -int(r["triage_score"]),
+        -int(r["mention_count"]),
+        -int(r["distinct_content_count"]),
+        r["display_name"].lower(),
+    ))
     path = out / "mention_candidates.csv"
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fields)
@@ -326,7 +372,7 @@ def main():
         for seg in read_segments(path, source_type):
             text = seg["text"] or ""
             keys = []
-            for key, raw, typ, start, end, canonical in extract_mentions(text, known):
+            for key, raw, typ, start, end, canonical, signal in extract_mentions(text, known):
                 ctx = text[max(0, start - 160):min(len(text), end + 160)].replace("\n", " ").strip()
                 typ = typ or classify(raw, ctx)
                 keys.append(key)
@@ -340,6 +386,7 @@ def main():
                     "sample_content_id": seg["content_id"],
                     "sample_snippet": ctx,
                     "canonical_entity_id": canonical,
+                    "signals": set(),
                 })
                 r["mentions"] += 1
                 r["contents"].add(seg["content_id"])
@@ -348,6 +395,7 @@ def main():
                     r["speakers"].add(seg["speaker"])
                 if canonical and not r["canonical_entity_id"]:
                     r["canonical_entity_id"] = canonical
+                r["signals"].add(signal)
                 evidence.append({
                     "batch_id": args.batch_id,
                     "source_label": args.source_label,
@@ -356,6 +404,7 @@ def main():
                     "display_name": raw,
                     "candidate_type": typ,
                     "canonical_entity_id": canonical,
+                    "signal": signal,
                     **seg,
                     "snippet": ctx,
                 })
@@ -375,26 +424,41 @@ def main():
 
     batch_rows = []
     for key, r in agg.items():
+        content_count = len(r["contents"])
+        speaker_count = len(r["speakers"])
+        score, priority = triage(
+            r["canonical_entity_id"], r["candidate_type"], r["mentions"],
+            content_count, speaker_count, r["signals"]
+        )
         batch_rows.append({
             "candidate_key": key,
             "display_name": r["display_name"],
             "candidate_type": r["candidate_type"],
             "canonical_entity_id": r["canonical_entity_id"],
             "mention_count": r["mentions"],
-            "distinct_content_count": len(r["contents"]),
+            "distinct_content_count": content_count,
             "distinct_source_count": len(r["sources"]),
-            "speaker_count": len(r["speakers"]),
+            "speaker_count": speaker_count,
+            "triage_score": score,
+            "review_priority": priority,
+            "signal_types": ";".join(sorted(r["signals"])),
             "sample_content_id": r["sample_content_id"],
             "sample_snippet": r["sample_snippet"],
             "batch_id": args.batch_id,
             "source_label": args.source_label,
         })
-    batch_rows.sort(key=lambda r: (-r["mention_count"], -r["distinct_content_count"], r["display_name"].lower()))
+    priority_order = {"EXISTING": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    batch_rows.sort(key=lambda r: (
+        priority_order.get(r["review_priority"], 9),
+        -int(r["triage_score"]),
+        -int(r["mention_count"]),
+        r["display_name"].lower(),
+    ))
 
     bf = [
         "candidate_key","display_name","candidate_type","canonical_entity_id","mention_count",
-        "distinct_content_count","distinct_source_count","speaker_count","sample_content_id",
-        "sample_snippet","batch_id","source_label"
+        "distinct_content_count","distinct_source_count","speaker_count","triage_score",
+        "review_priority","signal_types","sample_content_id","sample_snippet","batch_id","source_label"
     ]
     with (run_dir / "mention_candidates.csv").open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=bf)
@@ -427,6 +491,10 @@ def main():
         "master_candidate_count": len(master_rows),
         "mention_evidence_rows": len(evidence),
         "known_aliases_loaded": len(known),
+        "priority_counts": {
+            p: sum(1 for r in batch_rows if r["review_priority"] == p)
+            for p in ("EXISTING", "HIGH", "MEDIUM", "LOW")
+        },
     }
     (run_dir / "spider_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
