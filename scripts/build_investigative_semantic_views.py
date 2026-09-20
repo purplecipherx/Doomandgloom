@@ -186,6 +186,46 @@ def main():
         "content_id","rhetorical_event_count","rhetorical_predicates_json","product_mention_count","products_json","note"
     ])
 
+    # 5. Reputational/misconduct allegation resolution. This is descriptive;
+    # legal labels such as defamation/libel/slander are not inferred here.
+    claim_by_id={c.get("claim_id",""):c for c in claims}
+    reputational=[]
+    for e in events:
+        pred=e.get("predicate_code","")
+        if not (pred.startswith("ACCUSES_") or pred in {
+            "CALLS_DISHONEST","CALLS_FRAUDULENT","CALLS_SCAM","CALLS_LIE",
+            "CALLS_CORRUPT","CALLS_COMPROMISED","QUESTIONS_CREDIBILITY","QUESTIONS_MOTIVES"
+        }):
+            continue
+        try:
+            linked=json.loads(e.get("related_claim_ids_json") or "[]")
+        except Exception:
+            linked=[]
+        if not linked:
+            reputational.append({
+                "semantic_event_id":e.get("semantic_event_id",""),"source":e.get("source_entity_id") or e.get("speaker_id",""),
+                "target":key_target(e),"predicate_code":pred,"severity":e.get("severity",""),
+                "claim_id":"","claim_text":"","fact_status":"NO_LINKED_CLAIM",
+                "content_id":e.get("content_id",""),"unit_id":e.get("unit_id",""),
+                "note":"Semantically verified allegation; no linked atomic claim yet."
+            })
+            continue
+        for cid in linked:
+            c=claim_by_id.get(cid,{})
+            status=(fact_by_claim.get(cid,{}).get("status") or c.get("fact_check_status") or "PENDING").upper()
+            reputational.append({
+                "semantic_event_id":e.get("semantic_event_id",""),"source":e.get("source_entity_id") or e.get("speaker_id",""),
+                "target":key_target(e),"predicate_code":pred,"severity":e.get("severity",""),
+                "claim_id":cid,"claim_text":c.get("claim_text",""),"fact_status":status,
+                "content_id":e.get("content_id",""),"unit_id":e.get("unit_id",""),
+                "note":"Fact status describes the proposition; it is not a legal defamation/libel/slander determination."
+            })
+    reputational.sort(key=lambda r:(r["fact_status"],r["target"],r["source"],r["predicate_code"]))
+    write_csv(out/"reputational_allegations_and_fact_status.csv",reputational,[
+        "semantic_event_id","source","target","predicate_code","severity","claim_id","claim_text",
+        "fact_status","content_id","unit_id","note"
+    ])
+
     # 5. Claim accuracy/status by source after fact checking.
     source_claims=defaultdict(Counter)
     for c in claims:
@@ -211,7 +251,8 @@ def main():
     print(json.dumps({
         "semantic_events_used":len(events),"text_verification_required":not args.include_unverified_text_events,
         "pair_summaries":len(pair_rows),"targets":len(target_rows),
-        "shared_target_pairs":len(shared),"rhetoric_commerce_rows":len(rc),"claim_source_rows":len(acc),
+        "shared_target_pairs":len(shared),"rhetoric_commerce_rows":len(rc),
+        "reputational_allegation_rows":len(reputational),"claim_source_rows":len(acc),
         "output_dir":str(out)
     },indent=2))
     return 0
