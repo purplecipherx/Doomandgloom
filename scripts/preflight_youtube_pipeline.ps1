@@ -50,7 +50,14 @@ if (Test-Path $ytPython) {
         "import_moji_research_transcripts.py",
         "transcript_spider.py",
         "youtube_pipeline_orchestrator.py",
-        "rebuild_spider_index.py"
+        "rebuild_spider_index.py",
+        "build_research_ledger.py",
+        "pipeline_hub.py",
+        "pipeline_client.py",
+        "cpu_pipeline_server.py",
+        "gpu_pipeline_server.py",
+        "queue_youtube_corpus.py",
+        "queue_semantic_review.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
