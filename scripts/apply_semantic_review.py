@@ -6,6 +6,8 @@ import csv
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,6 +50,7 @@ def main():
     ap.add_argument("review_jsonl")
     ap.add_argument("--analysis-dir",default="data/analysis")
     ap.add_argument("--reviewer",default="")
+    ap.add_argument("--skip-voice-identity-sync",action="store_true")
     args=ap.parse_args()
 
     ad=Path(args.analysis_dir).resolve()
@@ -235,7 +238,8 @@ def main():
         "relationship_claim_id","unit_id","content_id","speaker_id","subject_entity_id","object_entity_id",
         "relationship_type","description","confidence","source_path"
     ])
-    write_csv(ad/"speaker_identity_clues.csv",identity_clues,[
+    identity_clues_path=ad/"speaker_identity_clues.csv"
+    write_csv(identity_clues_path,identity_clues,[
         "identity_clue_id","unit_id","content_id","channel_id","start_seconds","end_seconds","target_acoustic_cluster_id",
         "target_raw_speaker_id","current_canonical_voice_id","current_resolved_entity_id",
         "claimed_entity_id","claimed_name","evidence_type","evidence_text","confidence",
@@ -292,10 +296,33 @@ def main():
             if row["unit_id"] in reviews: row["status"]="COMPLETE"
         write_csv(idx_path,idx,["unit_id","batch_id","batch_path","created_at","status"])
 
+    voice_identity_sync={"attempted":False}
+    if not args.skip_voice_identity_sync and identity_clues and identity_clues_path.exists():
+        repo_root=ad.parents[1] if len(ad.parents)>=2 else Path.cwd()
+        voice_db=repo_root/"research"/"audio_identity"/"voice_identity.sqlite"
+        identity_script=repo_root/"scripts"/"audio_identity_db.py"
+        if voice_db.exists() and identity_script.exists():
+            voice_identity_sync["attempted"]=True
+            commands=[
+                [sys.executable,str(identity_script),"--db",str(voice_db),"ingest-clues","--clues-csv",str(identity_clues_path)],
+                [sys.executable,str(identity_script),"--db",str(voice_db),"fuse-identities"],
+                [sys.executable,str(identity_script),"--db",str(voice_db),"export-hypotheses","--output",str(repo_root/"data"/"audio"/"identity_hypotheses.csv")],
+                [sys.executable,str(identity_script),"--db",str(voice_db),"export","--output",str(repo_root/"data"/"audio"/"speaker_resolution_current.csv")],
+            ]
+            results=[]
+            for cmd in commands:
+                cp=subprocess.run(cmd,cwd=str(repo_root),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                results.append({"command":cmd[3] if len(cmd)>3 else "","exit_code":cp.returncode,"stdout":cp.stdout[-1000:],"stderr":cp.stderr[-1000:]})
+                if cp.returncode:
+                    voice_identity_sync["error"]=cp.stderr[-2000:] or cp.stdout[-2000:]
+                    break
+            voice_identity_sync["results"]=results
+
     print(json.dumps({
         "accepted_reviews":accepted,"total_reviews":len(reviews),"claims":len(claims),
         "fact_checks_pending":len(unresolved),"mentions":len(mentions),"relationships":len(relationships),
-        "stances":len(stances),"speaker_identity_clues":len(identity_clues),"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
+        "stances":len(stances),"speaker_identity_clues":len(identity_clues),
+        "voice_identity_sync":voice_identity_sync,"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
     },indent=2))
     return 0
 
