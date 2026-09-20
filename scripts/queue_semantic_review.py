@@ -22,16 +22,52 @@ def load_index(path: Path):
         return {}
     return {r["unit_id"]: r for r in csv.DictReader(path.open(encoding="utf-8-sig"))}
 
+def load_caption_attributions(root: Path):
+    out = {}
+    if not root.exists():
+        return out
+    for p in root.rglob("caption_speaker_attribution.csv"):
+        try:
+            rows = csv.DictReader(p.open(encoding="utf-8-sig"))
+            for r in rows:
+                vid = r.get("video_id", "")
+                try:
+                    st = round(float(r.get("start_seconds") or 0), 3)
+                    en = round(float(r.get("end_seconds") or 0), 3)
+                except Exception:
+                    continue
+                text_key = " ".join((r.get("text") or "").split()).lower()
+                out[(vid, st, en, text_key)] = r
+        except Exception:
+            continue
+    return out
+
+def attribution_for(row, attribution):
+    try:
+        key = (
+            row.get("content_id", ""),
+            round(float(row.get("start_seconds") or 0), 3),
+            round(float(row.get("end_seconds") or 0), 3),
+            " ".join((row.get("text") or "").split()).lower(),
+        )
+    except Exception:
+        return {}
+    return attribution.get(key, {})
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--ledger",default="data/analysis/transcript_units.csv")
     ap.add_argument("--output-dir",default="data/analysis/review_batches")
     ap.add_argument("--batch-size",type=int,default=40)
     ap.add_argument("--hub",default="")
+    ap.add_argument("--speaker-attribution-root",default="")
     args=ap.parse_args()
 
     ledger=Path(args.ledger).resolve()
     out=Path(args.output_dir).resolve()
+    repo_root=ledger.parents[2] if len(ledger.parents)>=3 else Path.cwd()
+    attribution_root=Path(args.speaker_attribution_root).resolve() if args.speaker_attribution_root else repo_root/"research"/"youtube"
+    caption_attribution=load_caption_attributions(attribution_root)
     pending_dir=out/"pending"; pending_dir.mkdir(parents=True,exist_ok=True)
     index_path=out/"review_batch_index.csv"
     index=load_index(index_path)
@@ -50,14 +86,19 @@ def main():
     for content_rows in by_content.values():
         for idx,r in enumerate(content_rows):
             def ctx(x):
+                a=attribution_for(x,caption_attribution)
                 return {
                     "unit_id":x.get("unit_id",""),
-                    "speaker_id":x.get("speaker_id",""),
-                    "raw_speaker_id":x.get("raw_speaker_id",""),
-                    "acoustic_cluster_id":x.get("acoustic_cluster_id",""),
-                    "canonical_voice_id":x.get("canonical_voice_id",""),
-                    "resolved_entity_id":x.get("resolved_entity_id",""),
-                    "speaker_display_name":x.get("speaker_display_name",""),
+                    "speaker_id":a.get("raw_speaker_id") or x.get("speaker_id",""),
+                    "raw_speaker_id":a.get("raw_speaker_id") or x.get("raw_speaker_id",""),
+                    "acoustic_cluster_id":a.get("acoustic_cluster_id") or x.get("acoustic_cluster_id",""),
+                    "canonical_voice_id":a.get("canonical_voice_id") or x.get("canonical_voice_id",""),
+                    "resolved_entity_id":a.get("resolved_entity_id") or x.get("resolved_entity_id",""),
+                    "speaker_display_name":a.get("speaker_display_name") or x.get("speaker_display_name",""),
+                    "speaker_attribution_status":a.get("speaker_attribution_status",""),
+                    "dominant_speaker_share":a.get("dominant_speaker_share",""),
+                    "speaker_coverage_ratio":a.get("speaker_coverage_ratio",""),
+                    "candidate_speakers_json":a.get("candidate_speakers_json",""),
                     "text":x.get("text",""),
                 }
             neighbor_map[r["unit_id"]]={
@@ -77,6 +118,7 @@ def main():
         path=pending_dir/f"{bid}.jsonl"
         with path.open("w",encoding="utf-8") as f:
             for r in chunk:
+                a=attribution_for(r,caption_attribution)
                 rec={
                     "batch_id":bid,
                     "unit_id":r["unit_id"],
@@ -85,15 +127,20 @@ def main():
                     "source_path":r["source_path"],
                     "start_seconds":r["start_seconds"],
                     "end_seconds":r["end_seconds"],
-                    "speaker_id":r["speaker_id"],
-                    "raw_speaker_id":r.get("raw_speaker_id",""),
-                    "acoustic_cluster_id":r.get("acoustic_cluster_id",""),
-                    "canonical_voice_id":r.get("canonical_voice_id",""),
-                    "resolved_entity_id":r.get("resolved_entity_id",""),
-                    "speaker_resolution_status":r.get("speaker_resolution_status",""),
-                    "speaker_resolution_confidence":r.get("speaker_resolution_confidence",""),
-                    "speaker_display_name":r.get("speaker_display_name",""),
-                    "channel_id":r.get("channel_id",""),
+                    "speaker_id":a.get("raw_speaker_id") or r["speaker_id"],
+                    "raw_speaker_id":a.get("raw_speaker_id") or r.get("raw_speaker_id",""),
+                    "acoustic_cluster_id":a.get("acoustic_cluster_id") or r.get("acoustic_cluster_id",""),
+                    "canonical_voice_id":a.get("canonical_voice_id") or r.get("canonical_voice_id",""),
+                    "resolved_entity_id":a.get("resolved_entity_id") or r.get("resolved_entity_id",""),
+                    "speaker_resolution_status":a.get("speaker_resolution_status") or r.get("speaker_resolution_status",""),
+                    "speaker_resolution_confidence":a.get("speaker_resolution_confidence") or r.get("speaker_resolution_confidence",""),
+                    "speaker_display_name":a.get("speaker_display_name") or r.get("speaker_display_name",""),
+                    "speaker_attribution_status":a.get("speaker_attribution_status",""),
+                    "speaker_coverage_ratio":a.get("speaker_coverage_ratio",""),
+                    "dominant_speaker_share":a.get("dominant_speaker_share",""),
+                    "second_speaker_share":a.get("second_speaker_share",""),
+                    "candidate_speakers_json":a.get("candidate_speakers_json",""),
+                    "channel_id":a.get("channel_id") or r.get("channel_id",""),
                     "text":r["text"],
                     "context_before":neighbor_map.get(r["unit_id"],{}).get("context_before",[]),
                     "context_after":neighbor_map.get(r["unit_id"],{}).get("context_after",[]),
