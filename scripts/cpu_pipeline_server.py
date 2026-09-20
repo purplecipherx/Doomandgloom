@@ -378,7 +378,14 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
 
 def worker_loop(index, args, repo, state):
     worker=f"{socket.gethostname()}-cpu-{index}"
-    kinds=["harvest_channel","prepare_audio","prepare_audio_batch","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
+    # Only one worker leases bulk audio batches. AUDIO_SEM still protects the
+    # actual downloader, while the remaining CPU workers stay available for
+    # harvest fan-out, spidering, identity sync, and analysis instead of
+    # blocking behind the audio semaphore.
+    if index == 1:
+        kinds=["harvest_channel","prepare_audio","prepare_audio_batch","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
+    else:
+        kinds=["harvest_channel","prepare_audio","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
     while True:
         try:
             job=lease(args.hub,lane="cpu",worker=worker,kinds=kinds,lease_seconds=args.lease_seconds)
