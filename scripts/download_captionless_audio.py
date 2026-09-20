@@ -28,6 +28,18 @@ DEFAULT_WORKERS = 4
 YOUTUBE_FALLBACK_CLIENTS = "default,web_embedded"
 AUDIO_EXTENSIONS = {".opus", ".m4a", ".mp3", ".aac", ".ogg", ".wav", ".flac", ".webm"}
 
+def common_ytdlp_args():
+    args = [
+        "--sleep-requests", str(SLEEP_REQUESTS),
+        "--sleep-interval", str(SLEEP_INTERVAL),
+        "--max-sleep-interval", str(MAX_SLEEP_INTERVAL),
+    ]
+    if REMOTE_EJS:
+        args += ["--remote-components", "ejs:npm"]
+    if COOKIE_BROWSER:
+        args += ["--cookies-from-browser", COOKIE_BROWSER]
+    return args
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -100,7 +112,7 @@ def download_audio_only(url: str, outtmpl: str, fallback_clients=False):
     return run(args)
 
 def download_muxed_fallback(url: str, outtmpl: str, fallback_clients=True):
-    args=[
+    args=common_ytdlp_args() + [
         "--no-playlist",
         "-f", "best[acodec!=none][vcodec!=none]",
         "-S", f"abr~{TARGET_KBPS},+size,+res,+br",
