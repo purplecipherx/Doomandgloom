@@ -5,6 +5,12 @@ param(
     [int]$CaptionWorkers = 8,
     [int]$AudioWorkers = 2,
     [int]$AudioBatchSize = 10,
+    [int]$SparseVoiceBatchSize = 10,
+    [double]$SparseVoiceIntervalSeconds = 90,
+    [double]$SparseVoiceClipSeconds = 3.0,
+    [double]$SparseVoiceMinCueSeconds = 1.8,
+    [int]$SparseVoiceMinWords = 3,
+    [int]$SparseVoiceMaxSamplesPerVideo = 80,
     [double]$Sleep = 0.75,
     [string]$WhisperModel = "medium.en",
     [string]$ComputeType = "int8",
@@ -17,7 +23,8 @@ param(
     [switch]$DoNotStartServers,
     [switch]$RestartServers,
     [switch]$Force,
-    [switch]$PreferExistingCaptions
+    [switch]$PreferExistingCaptions,
+    [switch]$FullWhisperAll
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,13 +73,14 @@ foreach ($r in $selected) {
 Write-Host ""
 Write-Host "Policy:" -ForegroundColor Yellow
 Write-Host "  * Inventory ALL videos/shorts/streams (no video-count limit)"
-if ($PreferExistingCaptions) {
-    Write-Host "  * Good captions are reused as transcript text when available"
-    Write-Host "  * Captionless items -> 128 kbps audio -> Moji diarization -> WhisperX transcription"
-    Write-Host "  * Captioned items -> 128 kbps audio -> Moji diarization/voice indexing -> caption speaker attribution"
+if ($FullWhisperAll) {
+    Write-Host "  * HEAVY MODE: every video -> full diarization + WhisperX"
 } else {
-    Write-Host "  * EVERY harvested video -> 128 kbps audio -> Moji diarization/embedding/clustering -> WhisperX transcription"
-    Write-Host "  * Existing captions are still retained as independent text evidence, but are not used to skip Whisper"
+    Write-Host "  * DEFAULT: existing captions are transcript text"
+    Write-Host "  * Captioned videos -> sparse ~3 sec voice samples every ~90 sec -> embeddings/clustering"
+    Write-Host "  * No full pyannote pass for captioned media"
+    Write-Host "  * Captionless/bad-caption items -> full diarization + WhisperX fallback"
+    Write-Host "  * High-value evidence can be escalated later for local forensic reprocessing"
 }
 Write-Host "  * No bulk source-video retention"
 Write-Host ""
@@ -123,6 +131,12 @@ $argsList = @(
     "--caption-workers", "$CaptionWorkers",
     "--audio-workers", "$AudioWorkers",
     "--audio-batch-size", "$AudioBatchSize",
+    "--sparse-voice-batch-size", "$SparseVoiceBatchSize",
+    "--sparse-voice-interval-seconds", "$SparseVoiceIntervalSeconds",
+    "--sparse-voice-clip-seconds", "$SparseVoiceClipSeconds",
+    "--sparse-voice-min-cue-seconds", "$SparseVoiceMinCueSeconds",
+    "--sparse-voice-min-words", "$SparseVoiceMinWords",
+    "--sparse-voice-max-samples-per-video", "$SparseVoiceMaxSamplesPerVideo",
     "--audio-sleep-requests", "$AudioSleepRequests",
     "--audio-sleep-interval", "$AudioSleepInterval",
     "--audio-max-sleep-interval", "$AudioMaxSleepInterval",
@@ -134,7 +148,7 @@ $argsList = @(
 )
 # No --limit-videos / --captionless-limit / --voice-index-limit: zero means unlimited.
 # Default for this special full-corpus launcher is literal full Whisper transcription.
-if (-not $PreferExistingCaptions) { $argsList += "--force-whisper-all" }
+if ($FullWhisperAll) { $argsList += "--force-whisper-all" }
 if ($CookiesFromBrowser.Trim()) { $argsList += @("--cookies-from-browser",$CookiesFromBrowser.Trim()) }
 if ($Force) { $argsList += "--force" }
 
