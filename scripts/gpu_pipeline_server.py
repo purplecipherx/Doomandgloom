@@ -128,13 +128,19 @@ def load_moji(moji_root:Path):
 
 def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
     p=json.loads(job["payload_json"])
-    if job["kind"] not in {"gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch"}:
+    if job["kind"] not in {"gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch","gpu_sparse_voice_batch"}:
         raise RuntimeError(f"unsupported GPU job kind: {job['kind']}")
 
     channel_root=repo/"research"/"youtube"/p["name"]
     voice_only = job["kind"]=="gpu_voice_index_channel"
+    sparse_mode = job["kind"]=="gpu_sparse_voice_batch"
     batch_mode = job["kind"]=="gpu_moji_batch"
-    if batch_mode:
+    if sparse_mode:
+        audio_dir=Path(p["sparse_sample_dir"])
+        audio_manifest=Path(p["audio_manifest_path"])
+        moji_out=Path(p["moji_output_path"])
+        research_out=Path(p.get("research_output_path") or channel_root/"speaker_attribution")
+    elif batch_mode:
         audio_dir=Path(p["audio_batch_dir"])
         audio_manifest=Path(p["audio_manifest_path"])
         moji_out=Path(p["moji_output_path"])
@@ -157,37 +163,57 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
 
         stage(log,"scan")
         cmd_scan(Namespace(output=str(moji_out),force=False,input=str(audio_dir),hash="sha256"))
-        if batch_mode:
+        if batch_mode or sparse_mode:
             rec=reconcile_batch_source_index(moji_out,audio_dir)
             print(f"Batch source reconciliation: removed={rec['removed']} remaining={rec['remaining']}",flush=True)
-        stage(log,"diarize")
-        cmd_diarize(Namespace(output=str(moji_out),force=False,hf_token=None,device=p.get("device","cuda")))
-        stage(log,"embed")
-        cmd_embed(Namespace(
-            output=str(moji_out),force=False,embed_device="cpu",
-            embedding_model=p.get("embedding_model","hbredin/wespeaker-voxceleb-resnet34-LM"),
-            embedding_segments=int(p.get("embedding_segments",20))
-        ))
-        stage(log,"cluster")
-        cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
 
-        if not voice_only:
-            stage(log,"extract")
-            cmd_extract(Namespace(
-                output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
-                gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
+        if sparse_mode:
+            stage(log,"seed_sparse")
+            seed_script=repo/"scripts"/"seed_sparse_voice_moji.py"
+            cp=subprocess.run([sys.executable,str(seed_script),"--moji-output",str(moji_out)],
+                              cwd=str(repo),text=True,stdout=log,stderr=subprocess.STDOUT)
+            if cp.returncode:
+                raise RuntimeError(f"sparse Moji seeding exit code {cp.returncode}")
+            stage(log,"embed_sparse")
+            cmd_embed(Namespace(
+                output=str(moji_out),force=False,embed_device=p.get("sparse_embed_device","cuda"),
+                embedding_model=p.get("embedding_model","hbredin/wespeaker-voxceleb-resnet34-LM"),
+                embedding_segments=1
             ))
-            stage(log,"transcribe")
-            cmd_transcribe(Namespace(
-                output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
-                language=p.get("language","en"),device=p.get("device","cuda"),
-                compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
+            stage(log,"cluster_sparse")
+            cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
+        else:
+            stage(log,"diarize")
+            cmd_diarize(Namespace(output=str(moji_out),force=False,hf_token=None,device=p.get("device","cuda")))
+            stage(log,"embed")
+            cmd_embed(Namespace(
+                output=str(moji_out),force=False,embed_device="cpu",
+                embedding_model=p.get("embedding_model","hbredin/wespeaker-voxceleb-resnet34-LM"),
+                embedding_segments=int(p.get("embedding_segments",20))
             ))
+            stage(log,"cluster")
+            cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
+
+            if not voice_only:
+                stage(log,"extract")
+                cmd_extract(Namespace(
+                    output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
+                    gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
+                ))
+                stage(log,"transcribe")
+                cmd_transcribe(Namespace(
+                    output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
+                    language=p.get("language","en"),device=p.get("device","cuda"),
+                    compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
+                ))
 
         print(f"GPU memory after: {json.dumps(gpu_memory())}")
 
     cid=p["channel_id"]; gen=p["generation"]
-    if voice_only:
+    if sparse_mode:
+        next_kind="sparse_voice_identity_sync"
+        next_key=f"sparsevoice:{cid}:{gen}:{p.get('batch_id','')}"
+    elif voice_only:
         next_kind="caption_voice_identity_sync"
         next_key=f"captionvoice:{cid}:{gen}"
     else:
@@ -230,7 +256,7 @@ def main():
     try:
         while True:
             try:
-                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch"],lease_seconds=args.lease_seconds)
+                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel","gpu_voice_index_channel","gpu_moji_batch","gpu_sparse_voice_batch"],lease_seconds=args.lease_seconds)
             except Exception:
                 time.sleep(args.poll); continue
             if not job:
