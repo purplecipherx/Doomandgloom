@@ -134,21 +134,17 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
             compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
         ))
 
-        bridge=repo/"scripts"/"import_moji_research_transcripts.py"
-        cp=subprocess.run([
-            sys.executable,str(bridge),"--moji-output",str(moji_out),
-            "--audio-manifest",str(audio_manifest),"--output",str(research_out)
-        ],cwd=str(repo),text=True)
-        if cp.returncode:
-            raise RuntimeError(f"timestamp bridge exit code {cp.returncode}")
         print(f"GPU memory after: {json.dumps(gpu_memory())}")
 
     cid=p["channel_id"]; gen=p["generation"]
-    enqueue(hub,kind="analysis_sync",lane="cpu",payload=p,job_key=f"analysis:gpu:{cid}:{gen}",priority=30)
-    enqueue(hub,kind="spider_channel",lane="cpu",payload=p,job_key=f"spider:gpu:{cid}:{gen}",priority=50)
+    enqueue(
+        hub,kind="audio_identity_sync",lane="cpu",payload=p,
+        job_key=f"voice:{cid}:{gen}",priority=15,max_attempts=3
+    )
     return {
         "exit_code":0,"channel_id":cid,"generation":gen,
-        "diarized_transcript":str(research_out/"diarized_transcript.csv"),
+        "moji_output":str(moji_out),
+        "next_stage":"audio_identity_sync",
         "gpu_memory":gpu_memory()
     }
 
