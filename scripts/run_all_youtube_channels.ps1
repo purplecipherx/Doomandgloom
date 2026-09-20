@@ -77,7 +77,8 @@ foreach ($ch in $channels) {
         $spiderBatchId = $batchStamp + "_" + $ch.channel_id
         Write-Host ""
         Write-Host "--- transcript spider: $($ch.channel_id) ---"
-        & powershell.exe -ExecutionPolicy Bypass -File $spiderRunner -BatchId $spiderBatchId
+        $channelRoot = Join-Path (Join-Path $repoRoot "research\youtube") $safeName
+        & powershell.exe -ExecutionPolicy Bypass -File $spiderRunner -ResearchRoot $channelRoot -BatchId $spiderBatchId
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Spider failed for $($ch.channel_id); continuing batch."
         }
@@ -94,15 +95,8 @@ Write-Host "Batch complete: $logPath"
 
 if (-not $SkipSpider -and $Mode -ne "inventory") {
     Write-Host ""
-    Write-Host "Final cumulative spider pass..."
-    $finalBatchId = $batchStamp + "_FINAL"
-    & powershell.exe -ExecutionPolicy Bypass -File $spiderRunner -BatchId $finalBatchId
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Review queue:"
-        Write-Host ("  " + (Join-Path $repoRoot "data\spider\mention_candidates.csv"))
-        Write-Host "Mention evidence:"
-        Write-Host ("  " + (Join-Path $repoRoot "data\spider\mention_evidence.jsonl"))
-        Write-Host "Co-mentions:"
-        Write-Host ("  " + (Join-Path $repoRoot "data\spider\co_mentions.csv"))
-    }
+    Write-Host "Spider review queue:"
+    Write-Host ("  " + (Join-Path $repoRoot "data\spider\mention_candidates.csv"))
+    Write-Host "Per-channel spider audit runs:"
+    Write-Host ("  " + (Join-Path $repoRoot "data\spider\runs"))
 }
