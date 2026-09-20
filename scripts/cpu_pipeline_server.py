@@ -93,7 +93,11 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
     if kind=="harvest_channel":
         pairs=[
             ("Url",payload["url"]),("Name",payload["name"]),
-            ("Workers",payload.get("caption_workers",8)),("Sleep",payload.get("sleep",0.75))
+            ("Workers",payload.get("caption_workers",8)),("Sleep",payload.get("sleep",0.75)),
+            ("CookiesFromBrowser",payload.get("cookies_from_browser","")),
+            ("SleepRequests",payload.get("audio_sleep_requests",1.5)),
+            ("SleepInterval",payload.get("audio_sleep_interval",2.0)),
+            ("MaxSleepInterval",payload.get("audio_max_sleep_interval",5.0))
         ]
         if int(payload.get("limit_videos",0) or 0)>0: pairs.append(("Limit",payload["limit_videos"]))
         with HARVEST_SEM:
