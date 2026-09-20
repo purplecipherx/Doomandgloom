@@ -18,9 +18,11 @@ BUILDER_VERSION = "caption_overlap_v2"
 
 FIELDS = [
     "unit_id","content_id","source_type","source_path","source_sha256",
+    "channel_id","platform_channel_id","channel_name","title","canonical_url",
+    "published_at","published_date","publication_precision",
     "start_seconds","end_seconds","speaker_id","raw_speaker_id","acoustic_cluster_id",
     "canonical_voice_id","resolved_entity_id","speaker_resolution_status",
-    "speaker_resolution_confidence","speaker_display_name","channel_id","text","unit_index","builder_version",
+    "speaker_resolution_confidence","speaker_display_name","text","unit_index","builder_version",
     "source_status","superseded_at","semantic_review_status","fact_check_status","created_at","last_seen_at"
 ]
 
@@ -132,13 +134,72 @@ def reconstruct_caption_segments(path: Path, max_words=42, gap_seconds=1.75):
         "reconstructed_segments":len(segments),
     }
 
+_META_CACHE = {}
+
+def _channel_root(path: Path):
+    for p in [path.parent, *path.parents]:
+        if re.fullmatch(r"YT\d+", p.name, re.I):
+            return p
+    return None
+
+def _iso_from_metadata(meta):
+    for key in ("release_timestamp","timestamp"):
+        value=meta.get(key)
+        if value not in (None,""):
+            try:
+                dt=datetime.fromtimestamp(float(value),tz=timezone.utc)
+                return dt.isoformat(),dt.date().isoformat(),"TIMESTAMP"
+            except Exception:
+                pass
+    raw=str(meta.get("upload_date") or meta.get("release_date") or "").strip()
+    if re.fullmatch(r"\d{8}",raw):
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}T00:00:00+00:00",f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}","DATE"
+    return "","","UNKNOWN"
+
+def load_media_metadata(path: Path, content_id: str):
+    root=_channel_root(path)
+    channel_id=root.name if root else ""
+    cache_key=(str(root) if root else "",content_id)
+    if cache_key in _META_CACHE:
+        return dict(_META_CACHE[cache_key])
+    meta={}
+    if root:
+        mp=root/"metadata"/f"{content_id}.json"
+        if mp.exists():
+            try: meta=json.loads(mp.read_text(encoding="utf-8",errors="replace"))
+            except Exception: meta={}
+        if not meta:
+            inv=root/"inventory.csv"
+            if inv.exists():
+                try:
+                    for r in csv.DictReader(inv.open(encoding="utf-8-sig")):
+                        if (r.get("video_id") or r.get("id") or "")==content_id:
+                            meta=dict(r);break
+                except Exception:
+                    pass
+    published_at,published_date,precision=_iso_from_metadata(meta)
+    result={
+        "channel_id":channel_id,
+        "platform_channel_id":str(meta.get("channel_id") or meta.get("uploader_id") or ""),
+        "channel_name":str(meta.get("channel") or meta.get("uploader") or meta.get("channel_name") or ""),
+        "title":str(meta.get("title") or ""),
+        "canonical_url":str(meta.get("webpage_url") or meta.get("original_url") or meta.get("url") or (f"https://www.youtube.com/watch?v={content_id}" if content_id else "")),
+        "published_at":published_at,
+        "published_date":published_date,
+        "publication_precision":precision,
+    }
+    _META_CACHE[cache_key]=dict(result)
+    return result
+
 def iter_caption(path: Path):
     content_id = path.name[:-len(CAPTION_SUFFIX)]
+    metadata=load_media_metadata(path,content_id)
     segments,_stats=reconstruct_caption_segments(path)
     for o in segments:
         yield {
             "content_id": content_id,
             "source_type": "youtube_caption",
+            **metadata,
             "source_path": str(path.resolve()),
             "start_seconds": o.get("start_seconds", ""),
             "end_seconds": o.get("end_seconds", ""),
@@ -155,9 +216,12 @@ def iter_diarized(path: Path):
             o = json.loads(line)
         except Exception:
             continue
+        content_id=o.get("video_id") or o.get("content_id") or ""
+        metadata=load_media_metadata(path,content_id)
         yield {
-            "content_id": o.get("video_id") or o.get("content_id") or "",
+            "content_id": content_id,
             "source_type": "moji_diarized",
+            **metadata,
             "source_path": str(path.resolve()),
             "start_seconds": o.get("start_seconds", ""),
             "end_seconds": o.get("end_seconds", ""),
@@ -169,16 +233,23 @@ def iter_diarized(path: Path):
             "speaker_resolution_status": o.get("speaker_resolution_status", ""),
             "speaker_resolution_confidence": o.get("speaker_resolution_confidence", ""),
             "speaker_display_name": o.get("speaker_display_name", ""),
-            "channel_id": o.get("channel_id", ""),
+            "channel_id": o.get("channel_id") or metadata.get("channel_id",""),
+            "title": metadata.get("title") or o.get("title",""),
+            "canonical_url": metadata.get("canonical_url") or o.get("canonical_url",""),
             "builder_version": BUILDER_VERSION,
             "text": o.get("text", ""),
         }
 
+def _is_production_channel_path(path: Path):
+    return any(re.fullmatch(r"YT\d+", p.name, re.I) for p in path.parents)
+
 def transcript_files(root: Path):
     for p in root.rglob(f"*{CAPTION_SUFFIX}"):
-        yield p, iter_caption
+        if _is_production_channel_path(p):
+            yield p, iter_caption
     for p in root.rglob(DIARIZED_NAME):
-        yield p, iter_diarized
+        if _is_production_channel_path(p):
+            yield p, iter_diarized
 
 def load_existing(path: Path):
     if not path.exists():
@@ -228,6 +299,8 @@ def main():
                     units[uid]["last_seen_at"] = observed_at
                     units[uid]["source_status"] = "CURRENT"
                     units[uid]["builder_version"] = seg.get("builder_version", BUILDER_VERSION)
+                    for mk in ("channel_id","platform_channel_id","channel_name","title","canonical_url","published_at","published_date","publication_precision"):
+                        units[uid][mk]=seg.get(mk,units[uid].get(mk,""))
                     units[uid]["superseded_at"] = ""
                     continue
                 units[uid] = {
@@ -236,6 +309,14 @@ def main():
                     "source_type": seg["source_type"],
                     "source_path": seg["source_path"],
                     "source_sha256": digest,
+                    "channel_id": seg.get("channel_id",""),
+                    "platform_channel_id": seg.get("platform_channel_id",""),
+                    "channel_name": seg.get("channel_name",""),
+                    "title": seg.get("title",""),
+                    "canonical_url": seg.get("canonical_url",""),
+                    "published_at": seg.get("published_at",""),
+                    "published_date": seg.get("published_date",""),
+                    "publication_precision": seg.get("publication_precision","UNKNOWN"),
                     "start_seconds": start,
                     "end_seconds": end,
                     "speaker_id": seg["speaker_id"],
@@ -246,7 +327,6 @@ def main():
                     "speaker_resolution_status": seg.get("speaker_resolution_status", ""),
                     "speaker_resolution_confidence": seg.get("speaker_resolution_confidence", ""),
                     "speaker_display_name": seg.get("speaker_display_name", ""),
-                    "channel_id": seg.get("channel_id", ""),
                     "text": part,
                     "unit_index": idx,
                     "builder_version": seg.get("builder_version", BUILDER_VERSION),
