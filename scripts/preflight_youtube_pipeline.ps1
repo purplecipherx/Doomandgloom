@@ -59,11 +59,15 @@ if (Test-Path $ytPython) {
         "queue_youtube_corpus.py",
         "queue_semantic_review.py",
         "apply_semantic_review.py",
-        "apply_fact_checks.py"
+        "apply_fact_checks.py",
+        "pipeline_selftest.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
     if ($LASTEXITCODE -eq 0) { Pass "Python scripts compile cleanly" } else { Fail "Python syntax compilation failed" }
+
+    & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
 
     & $ytPython -m yt_dlp --version
     if ($LASTEXITCODE -eq 0) { Pass "yt-dlp available" } else { Fail "yt-dlp unavailable in .venv-youtube" }
