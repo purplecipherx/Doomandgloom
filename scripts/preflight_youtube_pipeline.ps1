@@ -86,26 +86,60 @@ if ($Mode -eq "full") {
         "$env:USERPROFILE\Desktop\M0J1M0J1_GPU",
         "$env:USERPROFILE\Desktop\M0J1M0J1"
     )
-    $mojiRoot = $null
+
+    $voiceHarvestPath = $null
     foreach ($m in $mojiCandidates) {
-        if (Test-Path (Join-Path $m "voice_harvest.py")) { $mojiRoot = $m; break }
+        if (-not (Test-Path $m)) { continue }
+        $direct = Join-Path $m "voice_harvest.py"
+        if (Test-Path $direct) { $voiceHarvestPath = $direct; break }
+        $found = Get-ChildItem $m -Recurse -File -Filter "voice_harvest.py" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $voiceHarvestPath = $found.FullName; break }
     }
-    if ($mojiRoot) { Pass "Moji source found: $mojiRoot" } else { Fail "No local M0J1M0J1 voice_harvest.py found" }
+
+    if ($voiceHarvestPath) {
+        $mojiRoot = Split-Path -Parent $voiceHarvestPath
+        Pass "Moji source found: $voiceHarvestPath"
+    } else {
+        $mojiRoot = $null
+        Fail "No local voice_harvest.py found under M0J1M0J1_GPU or M0J1M0J1"
+    }
 
     $mojiPython = $null
     foreach ($m in $mojiCandidates) {
-        $p = Join-Path $m ".venv-voice-harvester\Scripts\python.exe"
-        if (Test-Path $p) { $mojiPython = $p; break }
-    }
-    if ($mojiPython) {
-        Pass "Moji voice-harvester venv found"
-        & $mojiPython -c "import torch; import pyannote.audio; import whisperx; print('torch_cuda=' + str(torch.cuda.is_available()))"
-        if ($LASTEXITCODE -eq 0) { Pass "Moji Python dependencies import successfully" } else { Fail "Moji dependencies failed to import" }
-    } else {
-        Fail "No .venv-voice-harvester found in either Moji tree"
+        if (-not (Test-Path $m)) { continue }
+        $direct = Join-Path $m ".venv-voice-harvester\Scripts\python.exe"
+        if (Test-Path $direct) { $mojiPython = $direct; break }
+        $found = Get-ChildItem $m -Recurse -File -Filter "python.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\.venv-voice-harvester\Scripts\python.exe" } |
+            Select-Object -First 1
+        if ($found) { $mojiPython = $found.FullName; break }
     }
 
-    if ($env:HF_TOKEN -or $env:HUGGINGFACE_TOKEN) { Pass "Hugging Face token present in this shell" } else { Fail "HF_TOKEN/HUGGINGFACE_TOKEN not set in this shell" }
+    if ($mojiPython) {
+        Pass "Moji voice-harvester venv found: $mojiPython"
+        & $mojiPython -c "import torch; import pyannote.audio; import whisperx; print('torch_cuda=' + str(torch.cuda.is_available()))"
+        if ($LASTEXITCODE -eq 0) {
+            Pass "Moji Python dependencies import successfully"
+        } else {
+            Fail "Moji dependencies failed to import"
+        }
+
+        & $mojiPython -c "import os; from huggingface_hub import get_token; raise SystemExit(0 if (os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN') or get_token()) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            Pass "Hugging Face authentication available (environment or cached login)"
+        } else {
+            Fail "No Hugging Face authentication found. Use the Moji venv and run: python -c \"from huggingface_hub import login; login()\""
+        }
+    } else {
+        Fail "No .venv-voice-harvester found under either Moji tree"
+        foreach ($m in $mojiCandidates) {
+            $installer = Join-Path $m "voice_harvester\install_windows.ps1"
+            if (Test-Path $installer) {
+                Warn "Bootstrap available: powershell.exe -ExecutionPolicy Bypass -File \"$installer\""
+                break
+            }
+        }
+    }
 }
 
 Write-Host ""
