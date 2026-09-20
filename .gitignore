@@ -15,3 +15,4 @@ research/youtube/**/moji_work/**/*.webm
 research/youtube/**/moji_work/**/*.sqlite
 research/youtube/**/moji_work/**/*.sqlite-shm
 research/youtube/**/moji_work/**/*.sqlite-wal
+research/runtime/
