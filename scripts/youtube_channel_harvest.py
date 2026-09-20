@@ -7,9 +7,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+COOKIE_BROWSER=""
+SLEEP_REQUESTS=1.5
+SLEEP_INTERVAL=2.0
+MAX_SLEEP_INTERVAL=5.0
+REMOTE_EJS=True
+
 TS_RE=re.compile(r"(?P<s>\d{2}:\d{2}:\d{2}[.,]\d{3})\s+-->\s+(?P<e>\d{2}:\d{2}:\d{2}[.,]\d{3})")
 TAG_RE=re.compile(r"<[^>]+>")
 SPACE_RE=re.compile(r"\s+")
+
+def common_ytdlp_args():
+    args=[
+        "--sleep-requests",str(SLEEP_REQUESTS),
+        "--sleep-interval",str(SLEEP_INTERVAL),
+        "--max-sleep-interval",str(MAX_SLEEP_INTERVAL),
+    ]
+    if REMOTE_EJS:
+        args += ["--remote-components","ejs:npm"]
+    if COOKIE_BROWSER:
+        args += ["--cookies-from-browser",COOKIE_BROWSER]
+    return args
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
@@ -25,7 +43,7 @@ def git_commit():
         return ""
 
 def ytdlp(args,timeout=180):
-    return subprocess.run([sys.executable,"-m","yt_dlp",*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,encoding="utf-8",errors="replace",timeout=timeout)
+    return subprocess.run([sys.executable,"-m","yt_dlp",*common_ytdlp_args(),*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,encoding="utf-8",errors="replace",timeout=timeout)
 
 def check_ytdlp():
     p=ytdlp(["--version"],30)
@@ -180,7 +198,19 @@ def main():
     ap.add_argument("url"); ap.add_argument("--output",default="research/youtube"); ap.add_argument("--name",default="")
     ap.add_argument("--language-regex",default=r"en(?:[-_].*)?"); ap.add_argument("--inventory-only",action="store_true")
     ap.add_argument("--workers",type=int,default=8); ap.add_argument("--sleep",type=float,default=0.75); ap.add_argument("--limit",type=int,default=0)
-    a=ap.parse_args(); check_ytdlp()
+    ap.add_argument("--cookies-from-browser",default="")
+    ap.add_argument("--sleep-requests",type=float,default=1.5)
+    ap.add_argument("--sleep-interval",type=float,default=2.0)
+    ap.add_argument("--max-sleep-interval",type=float,default=5.0)
+    ap.add_argument("--no-remote-ejs",action="store_true")
+    a=ap.parse_args()
+    global COOKIE_BROWSER,SLEEP_REQUESTS,SLEEP_INTERVAL,MAX_SLEEP_INTERVAL,REMOTE_EJS
+    COOKIE_BROWSER=a.cookies_from_browser.strip()
+    SLEEP_REQUESTS=max(0.0,a.sleep_requests)
+    SLEEP_INTERVAL=max(0.0,a.sleep_interval)
+    MAX_SLEEP_INTERVAL=max(SLEEP_INTERVAL,a.max_sleep_interval)
+    REMOTE_EJS=not a.no_remote_ejs
+    check_ytdlp()
     srcs=sources(a.url)
     if len(srcs)>1:
         with ThreadPoolExecutor(max_workers=min(3,len(srcs))) as inv_ex:
@@ -204,6 +234,11 @@ def main():
         "argv": sys.argv,
         "workers": a.workers,
         "sleep_seconds": a.sleep,
+        "cookies_from_browser": COOKIE_BROWSER,
+        "sleep_requests": SLEEP_REQUESTS,
+        "sleep_interval": SLEEP_INTERVAL,
+        "max_sleep_interval": MAX_SLEEP_INTERVAL,
+        "remote_ejs": REMOTE_EJS,
         "language_regex": a.language_regex,
         "limit": a.limit,
         "inventory_count": len(rows)
