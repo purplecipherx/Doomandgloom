@@ -10,6 +10,7 @@ param(
     [int]$BatchSize = 4,
     [switch]$SkipPreflight,
     [switch]$DoNotStartServers,
+    [switch]$RestartServers,
     [switch]$Force,
     [switch]$PreferExistingCaptions
 )
@@ -80,6 +81,11 @@ $runRoot = Join-Path $repoRoot "research\runtime"
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
 $subsetRegistry = Join-Path $runRoot "fitts_armstrong_full_registry.csv"
 $selected | Export-Csv -NoTypeInformation -Encoding UTF8 $subsetRegistry
+
+if ($RestartServers -and -not $DoNotStartServers) {
+    & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "stop_pipeline_servers.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Could not stop existing pipeline services." }
+}
 
 if (-not $DoNotStartServers) {
     $services = Join-Path $runRoot "services.json"
