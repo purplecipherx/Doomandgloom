@@ -23,6 +23,7 @@ def main():
     ap.add_argument("--voice-index-limit",type=int,default=0)
     ap.add_argument("--caption-workers",type=int,default=8)
     ap.add_argument("--audio-workers",type=int,default=4)
+    ap.add_argument("--audio-batch-size",type=int,default=25)
     ap.add_argument("--sleep",type=float,default=0.75)
     ap.add_argument("--device",choices=["cuda","cpu"],default="cuda")
     ap.add_argument("--whisper-model",default="medium.en")
@@ -52,6 +53,7 @@ def main():
             "name":safe(cid),
             "caption_workers":args.caption_workers,
             "audio_workers":args.audio_workers,
+            "audio_batch_size":args.audio_batch_size,
             "sleep":args.sleep,
             "limit_videos":args.limit_videos,
             "captionless_limit":args.captionless_limit,
