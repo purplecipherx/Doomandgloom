@@ -51,9 +51,25 @@ def main():
     ap.add_argument("--analysis-dir",default="data/analysis")
     ap.add_argument("--reviewer",default="")
     ap.add_argument("--skip-voice-identity-sync",action="store_true")
+    ap.add_argument("--ontology",default="data/ontology/investigative_predicates.csv")
+    ap.add_argument("--skip-semantic-validation",action="store_true")
     args=ap.parse_args()
 
     ad=Path(args.analysis_dir).resolve()
+    repo_root=ad.parents[1] if len(ad.parents)>=2 else Path.cwd()
+    ontology_path=(repo_root/args.ontology).resolve() if not Path(args.ontology).is_absolute() else Path(args.ontology)
+    ontology_rows=list(csv.DictReader(ontology_path.open(encoding="utf-8-sig")))
+    ontology={r["predicate_code"]:r for r in ontology_rows}
+
+    if not args.skip_semantic_validation:
+        validator=repo_root/"scripts"/"validate_semantic_review_output.py"
+        cp=subprocess.run(
+            [sys.executable,str(validator),args.review_jsonl,"--ontology",str(ontology_path)],
+            cwd=str(repo_root),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True
+        )
+        if cp.returncode:
+            raise SystemExit("Semantic review validation failed:\n"+(cp.stdout or "")+(cp.stderr or ""))
+
     ledger_path=ad/"transcript_units.csv"
     units=list(csv.DictReader(ledger_path.open(encoding="utf-8-sig")))
     unit_map={r["unit_id"]:r for r in units}
@@ -117,6 +133,9 @@ def main():
             raw_predicate=norm(ev.get("raw_predicate") or ev.get("predicate_phrase") or "")
             if not predicate:
                 continue
+            if predicate not in ontology:
+                raise SystemExit(f"Unknown semantic predicate {predicate} in unit {uid}")
+            ontology_row=ontology[predicate]
             source_entity_id=ev.get("source_entity_id") or r.get("speaker_entity_id","") or u.get("resolved_entity_id","")
             target_entity_id=ev.get("target_entity_id","")
             target_surface=norm(ev.get("target_surface") or "")
@@ -132,7 +151,7 @@ def main():
                 "start_seconds":u.get("start_seconds",""),"end_seconds":u.get("end_seconds",""),
                 "speaker_id":u.get("speaker_id",""),"canonical_voice_id":u.get("canonical_voice_id",""),
                 "source_entity_id":source_entity_id,"source_surface":norm(ev.get("source_surface") or ""),
-                "predicate_code":predicate,"predicate_family":(ev.get("predicate_family") or "").upper(),
+                "predicate_code":predicate,"predicate_family":ontology_row.get("family","").upper(),
                 "raw_predicate":raw_predicate,
                 "target_entity_id":target_entity_id,"target_surface":target_surface,"target_claim_id":target_claim_id,
                 "object_entity_id":object_entity_id,"object_surface":object_surface,
