@@ -86,7 +86,7 @@ def any_media_file(vdir: Path):
     return max(candidates, key=lambda x: x.stat().st_size) if candidates else None
 
 def download_audio_only(url: str, outtmpl: str, fallback_clients=False):
-    args=[
+    args=common_ytdlp_args() + [
         "--no-playlist",
         "-f", "bestaudio",
         "-S", f"abr~{TARGET_KBPS}",
@@ -269,7 +269,19 @@ def main():
     ap.add_argument("--output-dir", default="")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    ap.add_argument("--cookies-from-browser", default="")
+    ap.add_argument("--sleep-requests", type=float, default=1.5)
+    ap.add_argument("--sleep-interval", type=float, default=2.0)
+    ap.add_argument("--max-sleep-interval", type=float, default=5.0)
+    ap.add_argument("--no-remote-ejs", action="store_true")
     args = ap.parse_args()
+
+    global COOKIE_BROWSER, SLEEP_REQUESTS, SLEEP_INTERVAL, MAX_SLEEP_INTERVAL, REMOTE_EJS
+    COOKIE_BROWSER = args.cookies_from_browser.strip()
+    SLEEP_REQUESTS = max(0.0, args.sleep_requests)
+    SLEEP_INTERVAL = max(0.0, args.sleep_interval)
+    MAX_SLEEP_INTERVAL = max(SLEEP_INTERVAL, args.max_sleep_interval)
+    REMOTE_EJS = not args.no_remote_ejs
 
     queue = Path(args.queue_csv).resolve()
     base = Path(args.output_dir).resolve() if args.output_dir else queue.parent / "audio_fallback"
@@ -290,6 +302,11 @@ def main():
         "argv": sys.argv,
         "queued_count": len(rows),
         "workers": workers,
+        "cookies_from_browser": COOKIE_BROWSER,
+        "sleep_requests": SLEEP_REQUESTS,
+        "sleep_interval": SLEEP_INTERVAL,
+        "max_sleep_interval": MAX_SLEEP_INTERVAL,
+        "remote_ejs": REMOTE_EJS,
         "target_audio_kbps": TARGET_KBPS,
         "format_rule": (
             "audio-only nearest 128 kbps first; if unavailable, muxed fallback "
