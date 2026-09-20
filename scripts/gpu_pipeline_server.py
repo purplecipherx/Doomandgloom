@@ -97,13 +97,14 @@ def load_moji(moji_root:Path):
 
 def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
     p=json.loads(job["payload_json"])
-    if job["kind"]!="gpu_moji_channel":
+    if job["kind"] not in {"gpu_moji_channel","gpu_voice_index_channel"}:
         raise RuntimeError(f"unsupported GPU job kind: {job['kind']}")
 
     channel_root=repo/"research"/"youtube"/p["name"]
-    audio_dir=channel_root/"audio_fallback"
+    voice_only = job["kind"]=="gpu_voice_index_channel"
+    audio_dir=channel_root/("voice_audio" if voice_only else "audio_fallback")
     audio_manifest=audio_dir/"audio_manifest.jsonl"
-    moji_out=channel_root/"moji_work"
+    moji_out=channel_root/("voice_index_work" if voice_only else "moji_work")
     research_out=channel_root/"diarized_transcripts"
     logs=repo/"research"/"runtime"/"logs"
     log_path=logs/f"job_{job['id']}_gpu_moji.log"
@@ -124,27 +125,35 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
             embedding_segments=int(p.get("embedding_segments",20))
         ))
         cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
-        cmd_extract(Namespace(
-            output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
-            gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
-        ))
-        cmd_transcribe(Namespace(
-            output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
-            language=p.get("language","en"),device=p.get("device","cuda"),
-            compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
-        ))
+
+        if not voice_only:
+            cmd_extract(Namespace(
+                output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
+                gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
+            ))
+            cmd_transcribe(Namespace(
+                output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
+                language=p.get("language","en"),device=p.get("device","cuda"),
+                compute_type=p.get("compute_type","int8"),batch_size=int(p.get("batch_size",4))
+            ))
 
         print(f"GPU memory after: {json.dumps(gpu_memory())}")
 
     cid=p["channel_id"]; gen=p["generation"]
+    if voice_only:
+        next_kind="caption_voice_identity_sync"
+        next_key=f"captionvoice:{cid}:{gen}"
+    else:
+        next_kind="audio_identity_sync"
+        next_key=f"voice:{cid}:{gen}"
     enqueue(
-        hub,kind="audio_identity_sync",lane="cpu",payload=p,
-        job_key=f"voice:{cid}:{gen}",priority=15,max_attempts=3
+        hub,kind=next_kind,lane="cpu",payload=p,
+        job_key=next_key,priority=15,max_attempts=3
     )
     return {
         "exit_code":0,"channel_id":cid,"generation":gen,
         "moji_output":str(moji_out),
-        "next_stage":"audio_identity_sync",
+        "next_stage":next_kind,
         "gpu_memory":gpu_memory()
     }
 
@@ -173,7 +182,7 @@ def main():
     try:
         while True:
             try:
-                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel"],lease_seconds=args.lease_seconds)
+                job=lease(args.hub,lane="gpu",worker=worker,kinds=["gpu_moji_channel","gpu_voice_index_channel"],lease_seconds=args.lease_seconds)
             except Exception:
                 time.sleep(args.poll); continue
             if not job:
