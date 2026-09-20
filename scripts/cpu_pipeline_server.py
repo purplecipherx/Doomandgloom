@@ -106,6 +106,15 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         return {"exit_code":0,"channel_root":str(channel_root),"force_whisper_all":bool(payload.get("force_whisper_all",False))}
 
     if kind=="prepare_audio":
+        common_audio_args=[]
+        cookie_browser=str(payload.get("cookies_from_browser") or "").strip()
+        if cookie_browser:
+            common_audio_args += ["--cookies-from-browser",cookie_browser]
+        common_audio_args += [
+            "--sleep-requests",str(payload.get("audio_sleep_requests",1.5)),
+            "--sleep-interval",str(payload.get("audio_sleep_interval",2.0)),
+            "--max-sleep-interval",str(payload.get("audio_max_sleep_interval",5.0)),
+        ]
         force_all=bool(payload.get("force_whisper_all",False))
         queue=channel_root/("inventory.csv" if force_all else "needs_transcription.csv")
 
@@ -143,7 +152,7 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
             return {"exit_code":0,"audio_batches_queued":queued,"batch_size":batch_size,"video_count":len(rows)}
 
         script=repo/"scripts"/"download_captionless_audio.py"
-        cmd=[str(ytpy),str(script),str(queue),"--workers",str(payload.get("audio_workers",audio_workers))]
+        cmd=[str(ytpy),str(script),str(queue),"--workers",str(payload.get("audio_workers",audio_workers)),*common_audio_args]
         if int(payload.get("captionless_limit",0) or 0)>0:
             cmd += ["--limit",str(payload["captionless_limit"])]
         with AUDIO_SEM:
@@ -162,13 +171,23 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         return {"exit_code":0,"audio_ready":ready}
 
     if kind=="prepare_audio_batch":
+        common_audio_args=[]
+        cookie_browser=str(payload.get("cookies_from_browser") or "").strip()
+        if cookie_browser:
+            common_audio_args += ["--cookies-from-browser",cookie_browser]
+        common_audio_args += [
+            "--sleep-requests",str(payload.get("audio_sleep_requests",1.5)),
+            "--sleep-interval",str(payload.get("audio_sleep_interval",2.0)),
+            "--max-sleep-interval",str(payload.get("audio_max_sleep_interval",5.0)),
+        ]
         queue=Path(payload["audio_batch_queue"])
         output_dir=Path(payload["audio_batch_dir"])
         script=repo/"scripts"/"download_captionless_audio.py"
         cmd=[
             str(ytpy),str(script),str(queue),
             "--output-dir",str(output_dir),
-            "--workers",str(payload.get("audio_workers",audio_workers))
+            "--workers",str(payload.get("audio_workers",audio_workers)),
+            *common_audio_args
         ]
         with AUDIO_SEM:
             code=run_logged(cmd,logs/f"job_{job['id']}_audio_batch.log",repo)
