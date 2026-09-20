@@ -14,7 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION=2
+SCHEMA_VERSION=3
 
 SCHEMA=r"""
 PRAGMA foreign_keys=ON;
@@ -103,6 +103,24 @@ CREATE TABLE IF NOT EXISTS identity_evidence(
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS identity_hypotheses(
+  hypothesis_id TEXT PRIMARY KEY,
+  cluster_observation_id TEXT NOT NULL REFERENCES acoustic_clusters(cluster_observation_id) ON DELETE CASCADE,
+  candidate_entity_id TEXT,
+  candidate_name TEXT,
+  context_score REAL NOT NULL DEFAULT 0,
+  acoustic_score REAL NOT NULL DEFAULT 0,
+  combined_score REAL NOT NULL DEFAULT 0,
+  evidence_count INTEGER NOT NULL DEFAULT 0,
+  independent_content_count INTEGER NOT NULL DEFAULT 0,
+  direct_evidence_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_identity_hypothesis_score ON identity_hypotheses(combined_score DESC);
 
 CREATE TABLE IF NOT EXISTS voice_match_candidates(
   candidate_id TEXT PRIMARY KEY,
@@ -472,6 +490,217 @@ def export_resolution(conn,out:Path):
         for r in rows:w.writerow({k:r.get(k,"") for k in fields})
     return len(rows)
 
+
+IDENTITY_EVIDENCE_WEIGHTS = {
+    "SELF_IDENTIFICATION": 1.00,
+    "HOST_INTRODUCTION": 0.95,
+    "EXPLICIT_INTRODUCTION": 0.95,
+    "CHANNEL_HOST_METADATA": 0.85,
+    "DIRECT_ADDRESS": 0.70,
+    "TITLE_METADATA": 0.65,
+    "CO_SPEAKER_REFERENCE": 0.55,
+    "TRANSCRIPT_CONTEXT": 0.45,
+}
+
+def ingest_identity_clues(conn, clues_csv:Path):
+    if not clues_csv.exists():
+        return 0
+    count=0
+    for r in csv.DictReader(clues_csv.open(encoding="utf-8-sig")):
+        cluster=clean(r.get("target_acoustic_cluster_id"))
+        if not cluster:
+            channel=clean(r.get("channel_id"))
+            raw=clean(r.get("target_raw_speaker_id"))
+            if raw:
+                rr=conn.execute(
+                    """SELECT cluster_observation_id FROM acoustic_clusters
+                       WHERE pipeline_cluster_id=? AND (?='' OR channel_id=?)
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (raw,channel,channel)
+                ).fetchone()
+                if rr: cluster=rr["cluster_observation_id"]
+        if not cluster:
+            continue
+        if not conn.execute("SELECT 1 FROM acoustic_clusters WHERE cluster_observation_id=?",(cluster,)).fetchone():
+            continue
+        evid=clean(r.get("identity_clue_id")) or stable(
+            "IE_",cluster,r.get("unit_id"),r.get("claimed_entity_id"),r.get("claimed_name"),r.get("evidence_type")
+        )
+        binding=conn.execute(
+            "SELECT canonical_voice_id FROM speaker_bindings WHERE cluster_observation_id=?",(cluster,)
+        ).fetchone()
+        weight=IDENTITY_EVIDENCE_WEIGHTS.get(clean(r.get("evidence_type")).upper(),0.35)
+        try:
+            conf=float(r.get("confidence") or 1.0)
+        except Exception:
+            conf=1.0
+        weight*=max(0.0,min(1.0,conf))
+        payload={
+            "candidate_entity_id":clean(r.get("claimed_entity_id")),
+            "candidate_name":clean(r.get("claimed_name")),
+            "unit_id":clean(r.get("unit_id")),
+            "channel_id":clean(r.get("channel_id")),
+            "speaker_adoption":clean(r.get("speaker_adoption")),
+        }
+        conn.execute(
+            """INSERT OR REPLACE INTO identity_evidence(
+               evidence_id,canonical_voice_id,cluster_observation_id,evidence_type,content_id,
+               start_seconds,end_seconds,evidence_text,source_id,weight,status,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (evid,binding["canonical_voice_id"] if binding else None,cluster,
+             clean(r.get("evidence_type")).upper(),clean(r.get("content_id")),
+             r.get("start_seconds") or None,r.get("end_seconds") or None,
+             clean(r.get("evidence_text")),clean(r.get("unit_id")),weight,"ACTIVE",now())
+        )
+        conn.execute(
+            "INSERT INTO identity_events(ts,event_type,canonical_voice_id,cluster_observation_id,detail_json) VALUES(?,?,?,?,?)",
+            (now(),"IDENTITY_CLUE_INGESTED",binding["canonical_voice_id"] if binding else None,cluster,json.dumps(payload,ensure_ascii=False))
+        )
+        count+=1
+    conn.commit()
+    return count
+
+def fuse_identity_hypotheses(conn):
+    clues=conn.execute(
+        """SELECT ie.*, ie.source_id AS unit_id FROM identity_evidence ie
+           WHERE ie.status='ACTIVE'"""
+    ).fetchall()
+    grouped=defaultdict(list)
+    clue_csv_candidates={}
+    # Candidate identity details are stored in identity_events detail_json for now.
+    for ev in conn.execute("SELECT cluster_observation_id,detail_json FROM identity_events WHERE event_type='IDENTITY_CLUE_INGESTED'"):
+        try:d=json.loads(ev["detail_json"] or "{}")
+        except Exception:continue
+        key=(ev["cluster_observation_id"],clean(d.get("candidate_entity_id")),clean(d.get("candidate_name")))
+        clue_csv_candidates.setdefault(key,[]).append(d)
+
+    for r in clues:
+        # Match evidence to candidate metadata through unit/cluster event records.
+        for key,vals in clue_csv_candidates.items():
+            if key[0]!=r["cluster_observation_id"]: continue
+            if any(clean(v.get("unit_id"))==clean(r["unit_id"]) for v in vals):
+                grouped[key].append(r)
+
+    created=now(); rows=[]
+    for (cluster,entity_id,name),evs in grouped.items():
+        if not (entity_id or name): continue
+        # Combine independent contextual evidence without allowing repeated weak clues to exceed 1 trivially.
+        products=1.0
+        contents=set()
+        direct=0
+        for e in evs:
+            w=max(0.0,min(1.0,float(e["weight"] or 0)))
+            products*=1.0-w
+            if e["content_id"]: contents.add(e["content_id"])
+            if clean(e["evidence_type"]).upper() in {"SELF_IDENTIFICATION","HOST_INTRODUCTION","EXPLICIT_INTRODUCTION"}:
+                direct+=1
+        context=1.0-products
+
+        acoustic=0.0
+        if entity_id:
+            q=conn.execute(
+                """SELECT vm.cosine_similarity,
+                          CASE WHEN vm.left_cluster_observation_id=? THEN vm.right_cluster_observation_id
+                               ELSE vm.left_cluster_observation_id END AS other_cluster
+                   FROM voice_match_candidates vm
+                   WHERE vm.left_cluster_observation_id=? OR vm.right_cluster_observation_id=?""",
+                (cluster,cluster,cluster)
+            ).fetchall()
+            for m in q:
+                br=conn.execute(
+                    """SELECT cs.resolved_entity_id,sb.binding_status
+                       FROM speaker_bindings sb
+                       JOIN canonical_speakers cs ON cs.canonical_voice_id=sb.canonical_voice_id
+                       WHERE sb.cluster_observation_id=?""",(m["other_cluster"],)
+                ).fetchone()
+                if br and clean(br["resolved_entity_id"])==entity_id and clean(br["binding_status"]).upper() in {"VERIFIED","HIGH_CONFIDENCE"}:
+                    sim=float(m["cosine_similarity"])
+                    acoustic=max(acoustic,max(0.0,min(1.0,(sim-0.55)/0.35)))
+
+        combined=1.0-(1.0-context)*(1.0-acoustic)
+        status="OPEN"
+        if (context>=0.88 and acoustic>=0.70) or (context>=0.96 and len(contents)>=2 and direct>=1):
+            status="HIGH_CONFIDENCE_CANDIDATE"
+        elif context<0.35 and acoustic<0.35:
+            status="WEAK"
+
+        hid=stable("IH_",cluster,entity_id,name)
+        old=conn.execute("SELECT status,notes,created_at FROM identity_hypotheses WHERE hypothesis_id=?",(hid,)).fetchone()
+        if old and clean(old["status"]).upper() in {"VERIFIED","REJECTED","HIGH_CONFIDENCE"}:
+            status=old["status"]
+        conn.execute(
+            """INSERT INTO identity_hypotheses(
+               hypothesis_id,cluster_observation_id,candidate_entity_id,candidate_name,
+               context_score,acoustic_score,combined_score,evidence_count,independent_content_count,
+               direct_evidence_count,status,created_at,updated_at,notes
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(hypothesis_id) DO UPDATE SET
+               context_score=excluded.context_score,acoustic_score=excluded.acoustic_score,
+               combined_score=excluded.combined_score,evidence_count=excluded.evidence_count,
+               independent_content_count=excluded.independent_content_count,
+               direct_evidence_count=excluded.direct_evidence_count,updated_at=excluded.updated_at,
+               status=CASE WHEN identity_hypotheses.status IN ('VERIFIED','REJECTED','HIGH_CONFIDENCE')
+                           THEN identity_hypotheses.status ELSE excluded.status END""",
+            (hid,cluster,entity_id,name,context,acoustic,combined,len(evs),len(contents),direct,status,
+             old["created_at"] if old else created,created,old["notes"] if old else "")
+        )
+        rows.append(hid)
+    conn.commit()
+    return len(rows)
+
+def approve_hypothesis(conn,hypothesis_id,status,bound_by):
+    h=conn.execute("SELECT * FROM identity_hypotheses WHERE hypothesis_id=?",(hypothesis_id,)).fetchone()
+    if not h: raise SystemExit(f"Unknown hypothesis: {hypothesis_id}")
+    status=clean(status).upper()
+    if status not in {"VERIFIED","HIGH_CONFIDENCE","REJECTED"}:
+        raise SystemExit("status must be VERIFIED, HIGH_CONFIDENCE, or REJECTED")
+    if status=="REJECTED":
+        conn.execute("UPDATE identity_hypotheses SET status='REJECTED',updated_at=? WHERE hypothesis_id=?",(now(),hypothesis_id))
+        conn.commit(); return ""
+    entity_id=clean(h["candidate_entity_id"]); name=clean(h["candidate_name"])
+    voice=None
+    if entity_id:
+        r=conn.execute(
+            "SELECT canonical_voice_id FROM canonical_speakers WHERE resolved_entity_id=? ORDER BY id LIMIT 1",(entity_id,)
+        ).fetchone()
+        if r: voice=r["canonical_voice_id"]
+    if not voice:
+        voice=new_voice(conn,name,entity_id,status,float(h["combined_score"] or 0),f"Created from approved {hypothesis_id}")
+    evidence={"hypothesis_id":hypothesis_id,"context_score":h["context_score"],"acoustic_score":h["acoustic_score"],"combined_score":h["combined_score"]}
+    bind(conn,h["cluster_observation_id"],voice,status,float(h["combined_score"] or 0),evidence,bound_by)
+    conn.execute("UPDATE canonical_speakers SET identity_status=?,identity_confidence=?,updated_at=? WHERE canonical_voice_id=?",
+                 (status,float(h["combined_score"] or 0),now(),voice))
+    conn.execute("UPDATE identity_hypotheses SET status=?,updated_at=? WHERE hypothesis_id=?",(status,now(),hypothesis_id))
+    conn.commit()
+    return voice
+
+def export_identity_hypotheses(conn,out:Path):
+    fields=[
+        "hypothesis_id","cluster_observation_id","candidate_entity_id","candidate_name",
+        "context_score","acoustic_score","combined_score","evidence_count","independent_content_count",
+        "direct_evidence_count","status","created_at","updated_at","notes"
+    ]
+    rows=[dict(r) for r in conn.execute(
+        "SELECT * FROM identity_hypotheses ORDER BY combined_score DESC,evidence_count DESC,hypothesis_id"
+    )]
+    out.parent.mkdir(parents=True,exist_ok=True)
+    with out.open("w",newline="",encoding="utf-8-sig") as f:
+        w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
+    return len(rows)
+
+def export_voice_match_candidates(conn,out:Path):
+    fields=[
+        "candidate_id","left_cluster_observation_id","right_cluster_observation_id","cosine_similarity",
+        "same_channel","rank_left","rank_right","margin_left","margin_right","status","created_at","review_notes"
+    ]
+    rows=[dict(r) for r in conn.execute(
+        "SELECT * FROM voice_match_candidates ORDER BY cosine_similarity DESC,candidate_id"
+    )]
+    out.parent.mkdir(parents=True,exist_ok=True)
+    with out.open("w",newline="",encoding="utf-8-sig") as f:
+        w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
+    return len(rows)
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--db",default="research/audio_identity/voice_identity.sqlite")
@@ -482,6 +711,11 @@ def main():
     s=sub.add_parser("ingest-moji"); s.add_argument("--moji-output",required=True); s.add_argument("--channel-id",default="")
     s=sub.add_parser("extract-exemplars"); s.add_argument("--moji-output",required=True); s.add_argument("--vault",default="research/audio_vault"); s.add_argument("--per-local-speaker",type=int,default=8); s.add_argument("--min-sec",type=float,default=2.0); s.add_argument("--max-sec",type=float,default=10.0)
     s=sub.add_parser("match"); s.add_argument("--min-similarity",type=float,default=0.58)
+    s=sub.add_parser("ingest-clues"); s.add_argument("--clues-csv",required=True)
+    s=sub.add_parser("fuse-identities")
+    s=sub.add_parser("approve-hypothesis"); s.add_argument("--hypothesis",required=True); s.add_argument("--status",required=True); s.add_argument("--bound-by",default="")
+    s=sub.add_parser("export-hypotheses"); s.add_argument("--output",default="data/audio/identity_hypotheses.csv")
+    s=sub.add_parser("export-matches"); s.add_argument("--output",default="data/audio/voice_match_candidates.csv")
     s=sub.add_parser("new-voice"); s.add_argument("--display-name",default=""); s.add_argument("--entity-id",default=""); s.add_argument("--status",default="UNKNOWN"); s.add_argument("--confidence",type=float); s.add_argument("--notes",default="")
     s=sub.add_parser("bind"); s.add_argument("--cluster",required=True); s.add_argument("--voice",required=True); s.add_argument("--status",default="POSSIBLE"); s.add_argument("--confidence",type=float,default=0.0); s.add_argument("--evidence-json",default="{}"); s.add_argument("--bound-by",default="")
     s=sub.add_parser("export"); s.add_argument("--output",default="data/audio/speaker_resolution_current.csv")
@@ -503,6 +737,16 @@ def main():
         print(json.dumps({"voice_exemplars":extract_exemplars(conn,Path(args.moji_output).resolve(),(repo/args.vault).resolve(),args.per_local_speaker,args.min_sec,args.max_sec)},indent=2)); return 0
     if args.cmd=="match":
         print(json.dumps({"match_candidates":build_candidates(conn,args.min_similarity)},indent=2)); return 0
+    if args.cmd=="ingest-clues":
+        print(json.dumps({"identity_clues_ingested":ingest_identity_clues(conn,Path(args.clues_csv).resolve())},indent=2)); return 0
+    if args.cmd=="fuse-identities":
+        print(json.dumps({"identity_hypotheses_updated":fuse_identity_hypotheses(conn)},indent=2)); return 0
+    if args.cmd=="approve-hypothesis":
+        print(approve_hypothesis(conn,args.hypothesis,args.status,args.bound_by)); return 0
+    if args.cmd=="export-hypotheses":
+        print(json.dumps({"rows":export_identity_hypotheses(conn,(repo/args.output).resolve())},indent=2)); return 0
+    if args.cmd=="export-matches":
+        print(json.dumps({"rows":export_voice_match_candidates(conn,(repo/args.output).resolve())},indent=2)); return 0
     if args.cmd=="new-voice":
         print(new_voice(conn,args.display_name,args.entity_id,args.status,args.confidence,args.notes)); return 0
     if args.cmd=="bind":
@@ -513,7 +757,7 @@ def main():
         print(json.dumps({"rows":export_resolution(conn,(repo/args.output).resolve())},indent=2)); return 0
     if args.cmd=="stats":
         stats={}
-        for table in ["audio_assets","acoustic_clusters","canonical_speakers","speaker_bindings","identity_evidence","voice_match_candidates","voice_exemplars","reference_clips"]:
+        for table in ["audio_assets","acoustic_clusters","canonical_speakers","speaker_bindings","identity_evidence","identity_hypotheses","voice_match_candidates","voice_exemplars","reference_clips"]:
             stats[table]=conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         stats["open_match_candidates"]=conn.execute("SELECT COUNT(*) FROM voice_match_candidates WHERE status='OPEN'").fetchone()[0]
         print(json.dumps(stats,indent=2)); return 0
