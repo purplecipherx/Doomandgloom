@@ -108,9 +108,43 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
     if kind=="prepare_audio":
         force_all=bool(payload.get("force_whisper_all",False))
         queue=channel_root/("inventory.csv" if force_all else "needs_transcription.csv")
+
+        if force_all:
+            rows=list(csv.DictReader(queue.open(encoding="utf-8-sig")))
+            batch_size=max(1,int(payload.get("audio_batch_size",25) or 25))
+            batch_root=channel_root/"full_audio_batches"/payload["generation"]
+            batch_root.mkdir(parents=True,exist_ok=True)
+            queued=0
+            for start in range(0,len(rows),batch_size):
+                batch_rows=rows[start:start+batch_size]
+                batch_id=f"B{start//batch_size+1:05d}"
+                work=batch_root/batch_id
+                work.mkdir(parents=True,exist_ok=True)
+                batch_queue=work/"queue.csv"
+                fields=list(batch_rows[0].keys()) if batch_rows else ["video_id","url","title"]
+                with batch_queue.open("w",newline="",encoding="utf-8-sig") as bf:
+                    w=csv.DictWriter(bf,fieldnames=fields); w.writeheader(); w.writerows(batch_rows)
+                bp=dict(payload)
+                bp.update({
+                    "batch_id":batch_id,
+                    "audio_batch_queue":str(batch_queue),
+                    "audio_batch_dir":str(work/"audio"),
+                    "audio_manifest_path":str(work/"audio"/"audio_manifest.jsonl"),
+                    "moji_output_path":str(work/"moji"),
+                    "research_output_path":str(channel_root/"diarized_transcripts"/"batches"/payload["generation"]/batch_id),
+                    "defer_analysis":True,
+                })
+                enqueue(
+                    hub,kind="prepare_audio_batch",lane="cpu",payload=bp,
+                    job_key=f"audiobatch:{payload['channel_id']}:{payload['generation']}:{batch_id}",
+                    priority=5,max_attempts=3
+                )
+                queued+=1
+            return {"exit_code":0,"audio_batches_queued":queued,"batch_size":batch_size,"video_count":len(rows)}
+
         script=repo/"scripts"/"download_captionless_audio.py"
         cmd=[str(ytpy),str(script),str(queue),"--workers",str(payload.get("audio_workers",audio_workers))]
-        if (not force_all) and int(payload.get("captionless_limit",0) or 0)>0:
+        if int(payload.get("captionless_limit",0) or 0)>0:
             cmd += ["--limit",str(payload["captionless_limit"])]
         with AUDIO_SEM:
             code=run_logged(cmd,logs/f"job_{job['id']}_audio.log",repo)
@@ -126,6 +160,37 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
         if ready:
             enqueue(hub,kind="gpu_moji_channel",lane="gpu",payload=payload,job_key=f"gpu:{payload['channel_id']}:{payload['generation']}",priority=20,max_attempts=2)
         return {"exit_code":0,"audio_ready":ready}
+
+    if kind=="prepare_audio_batch":
+        queue=Path(payload["audio_batch_queue"])
+        output_dir=Path(payload["audio_batch_dir"])
+        script=repo/"scripts"/"download_captionless_audio.py"
+        cmd=[
+            str(ytpy),str(script),str(queue),
+            "--output-dir",str(output_dir),
+            "--workers",str(payload.get("audio_workers",audio_workers))
+        ]
+        with AUDIO_SEM:
+            code=run_logged(cmd,logs/f"job_{job['id']}_audio_batch.log",repo)
+        if code:
+            raise RuntimeError(f"audio batch prefetch exit code {code}")
+        manifest=Path(payload["audio_manifest_path"])
+        ready=0
+        if manifest.exists():
+            for line in manifest.read_text(encoding="utf-8",errors="replace").splitlines():
+                try:
+                    r=json.loads(line)
+                    if r.get("status") in ("downloaded","cached") and r.get("audio_path"):
+                        ready+=1
+                except Exception:
+                    pass
+        if ready:
+            enqueue(
+                hub,kind="gpu_moji_batch",lane="gpu",payload=payload,
+                job_key=f"gpubatch:{payload['channel_id']}:{payload['generation']}:{payload['batch_id']}",
+                priority=20,max_attempts=2
+            )
+        return {"exit_code":0,"batch_id":payload["batch_id"],"audio_ready":ready}
 
     if kind=="prepare_voice_audio":
         caption_status=channel_root/"caption_status.csv"
@@ -219,9 +284,9 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
 
     if kind=="audio_identity_sync":
         identity_script=repo/"scripts"/"audio_identity_db.py"
-        audio_manifest=channel_root/"audio_fallback"/"audio_manifest.jsonl"
-        moji_out=channel_root/"moji_work"
-        research_out=channel_root/"diarized_transcripts"
+        audio_manifest=Path(payload.get("audio_manifest_path") or (channel_root/"audio_fallback"/"audio_manifest.jsonl"))
+        moji_out=Path(payload.get("moji_output_path") or (channel_root/"moji_work"))
+        research_out=Path(payload.get("research_output_path") or (channel_root/"diarized_transcripts"))
         resolution=repo/"data"/"audio"/"speaker_resolution_current.csv"
         voice_log=logs/f"job_{job['id']}_voice_identity.log"
 
@@ -252,8 +317,9 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
                 raise RuntimeError(f"voice-aware timestamp bridge exit code {code}")
 
         cid=payload["channel_id"]; gen=payload["generation"]
-        enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,job_key=f"analysis:voice:{cid}:{gen}",priority=30)
-        enqueue(hub,kind="spider_channel",lane="cpu",payload=payload,job_key=f"spider:voice:{cid}:{gen}",priority=50)
+        if not bool(payload.get("defer_analysis",False)):
+            enqueue(hub,kind="analysis_sync",lane="cpu",payload=payload,job_key=f"analysis:voice:{cid}:{gen}",priority=30)
+            enqueue(hub,kind="spider_channel",lane="cpu",payload=payload,job_key=f"spider:voice:{cid}:{gen}",priority=50)
         return {
             "exit_code":0,
             "speaker_resolution":str(resolution),
@@ -289,7 +355,7 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
 
 def worker_loop(index, args, repo, state):
     worker=f"{socket.gethostname()}-cpu-{index}"
-    kinds=["harvest_channel","prepare_audio","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
+    kinds=["harvest_channel","prepare_audio","prepare_audio_batch","prepare_voice_audio","caption_voice_identity_sync","audio_identity_sync","analysis_sync","spider_channel"]
     while True:
         try:
             job=lease(args.hub,lane="cpu",worker=worker,kinds=kinds,lease_seconds=args.lease_seconds)
