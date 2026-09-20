@@ -3,7 +3,8 @@ param(
     [string]$ResearchRoot,
     [string]$OutputDir = "data\spider",
     [Parameter(Mandatory=$true)]
-    [string]$BatchId
+    [string]$BatchId,
+    [string]$SourceLabel = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +21,7 @@ $argsList = @(
     "--output-dir", $outputPath
 )
 if ($BatchId) { $argsList += @("--batch-id", $BatchId) }
+if ($SourceLabel) { $argsList += @("--source-label", $SourceLabel) }
 
 & $python @argsList
 exit $LASTEXITCODE
