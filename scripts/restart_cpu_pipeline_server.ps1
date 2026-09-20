@@ -6,6 +6,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Stop-ProcessTree([int]$RootPid) {
+    $children = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { [int]$_.ParentProcessId -eq $RootPid })
+    foreach ($child in $children) {
+        Stop-ProcessTree -RootPid ([int]$child.ProcessId)
+    }
+    Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
@@ -23,8 +33,8 @@ if ($cpuPid -gt 0) {
         if ([string]$proc.CommandLine -notlike "*cpu_pipeline_server.py*") {
             throw "Refusing to stop PID $cpuPid because it is not cpu_pipeline_server.py"
         }
-        Write-Host "Stopping CPU pipeline PID $cpuPid"
-        Stop-Process -Id $cpuPid -Force
+        Write-Host "Stopping CPU pipeline PID $cpuPid and its child process tree"
+        Stop-ProcessTree -RootPid $cpuPid
         Start-Sleep -Milliseconds 700
     }
 }
