@@ -75,7 +75,9 @@ if (Test-Path $ytPython) {
         "validate_semantic_review_output.py",
         "apply_semantic_event_verification.py",
         "build_investigative_semantic_views.py",
-        "build_entity_resolution_queue.py"
+        "build_entity_resolution_queue.py",
+        "caption_dedupe_selftest.py",
+        "semantic_caption_attribution_selftest.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
@@ -107,6 +109,12 @@ if (Test-Path $ytPython) {
 
     & $ytPython (Join-Path $PSScriptRoot "semantic_pipeline_selftest.py")
     if ($LASTEXITCODE -eq 0) { Pass "End-to-end semantic evidence lifecycle self-test" } else { Fail "End-to-end semantic evidence lifecycle self-test failed" }
+
+    & $ytPython (Join-Path $PSScriptRoot "caption_dedupe_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Rolling caption deduplication self-test" } else { Fail "Rolling caption deduplication self-test failed" }
+
+    & $ytPython (Join-Path $PSScriptRoot "semantic_caption_attribution_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Reconstructed-caption speaker attribution self-test" } else { Fail "Reconstructed-caption speaker attribution self-test failed" }
 
     & $ytPython -m yt_dlp --version
     if ($LASTEXITCODE -eq 0) { Pass "yt-dlp available" } else { Fail "yt-dlp unavailable in .venv-youtube" }
