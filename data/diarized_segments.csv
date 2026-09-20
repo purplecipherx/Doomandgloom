@@ -1,0 +1,1 @@
+content_id,start_seconds,end_seconds,raw_speaker_label,resolved_entity_id,speaker_resolution_status,text,transcription_confidence,source_audio_sha256,diarizer_version,diarizer_run_id,transcription_model,transcription_version,verified_against_audio,source_ids,notes
