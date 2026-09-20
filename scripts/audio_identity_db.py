@@ -577,6 +577,29 @@ def fuse_identity_hypotheses(conn):
         key=(r["cluster_observation_id"],clean(r["candidate_entity_id"]),clean(r["candidate_name"]))
         grouped[key].append(r)
 
+    # Voice-only leads: if one side of a match is already bound to an identified
+    # canonical speaker, surface that identity as a candidate for the other side.
+    for vm in conn.execute("SELECT * FROM voice_match_candidates WHERE status<>'REJECTED'"):
+        for cluster,other in (
+            (vm["left_cluster_observation_id"],vm["right_cluster_observation_id"]),
+            (vm["right_cluster_observation_id"],vm["left_cluster_observation_id"]),
+        ):
+            if conn.execute("SELECT 1 FROM speaker_bindings WHERE cluster_observation_id=?",(cluster,)).fetchone():
+                continue
+            br=conn.execute(
+                """SELECT cs.resolved_entity_id,cs.display_name,sb.binding_status
+                   FROM speaker_bindings sb
+                   JOIN canonical_speakers cs ON cs.canonical_voice_id=sb.canonical_voice_id
+                   WHERE sb.cluster_observation_id=?""",(other,)
+            ).fetchone()
+            if not br:
+                continue
+            if clean(br["binding_status"]).upper() not in {"VERIFIED","HIGH_CONFIDENCE"}:
+                continue
+            entity_id=clean(br["resolved_entity_id"]); name=clean(br["display_name"])
+            if entity_id or name:
+                grouped.setdefault((cluster,entity_id,name),[])
+
     created=now(); rows=[]
     for (cluster,entity_id,name),evs in grouped.items():
         if not (entity_id or name): continue
@@ -616,6 +639,8 @@ def fuse_identity_hypotheses(conn):
         status="OPEN"
         if (context>=0.88 and acoustic>=0.70) or (context>=0.96 and len(contents)>=2 and direct>=1):
             status="HIGH_CONFIDENCE_CANDIDATE"
+        elif context<=0.01 and acoustic>=0.70:
+            status="ACOUSTIC_CANDIDATE"
         elif context<0.35 and acoustic<0.35:
             status="WEAK"
 
