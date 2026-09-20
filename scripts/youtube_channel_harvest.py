@@ -13,6 +13,17 @@ SPACE_RE=re.compile(r"\s+")
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
+def tool_version():
+    p=ytdlp(["--version"],30)
+    return p.stdout.strip() if p.returncode==0 else "unknown"
+
+def git_commit():
+    try:
+        p=subprocess.run(["git","rev-parse","HEAD"],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=10)
+        return p.stdout.strip() if p.returncode==0 else ""
+    except Exception:
+        return ""
+
 def ytdlp(args,timeout=180):
     return subprocess.run([sys.executable,"-m","yt_dlp",*args],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,encoding="utf-8",errors="replace",timeout=timeout)
 
@@ -168,8 +179,29 @@ def main():
     if a.limit>0: rows=rows[:a.limit]
     root,_=normalize_root(a.url); name=a.name.strip() or re.sub(r"[^A-Za-z0-9._-]+","_",root.rstrip("/").split("/")[-1] or "youtube")
     base=Path(a.output).expanduser().resolve()/name; write_inventory(base,rows,a.url)
+    manifest={
+        "run_id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")+"_"+name,
+        "started_at": now(),
+        "input_url": a.url,
+        "source_name": name,
+        "mode": "inventory_only" if a.inventory_only else "inventory_and_captions",
+        "python_version": sys.version,
+        "yt_dlp_version": tool_version(),
+        "repo_git_commit": git_commit(),
+        "argv": sys.argv,
+        "workers": a.workers,
+        "sleep_seconds": a.sleep,
+        "language_regex": a.language_regex,
+        "limit": a.limit,
+        "inventory_count": len(rows)
+    }
+    (base/"run_manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
     print(f"[inventory-complete] {len(rows)} unique videos -> {base/'inventory.csv'}",flush=True)
-    if a.inventory_only: return 0
+    if a.inventory_only:
+        manifest["completed_at"]=now()
+        manifest["status"]="complete"
+        (base/"run_manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+        return 0
     results=[]; workers=max(1,a.workers)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         fs={ex.submit(process,r,base,a.language_regex,a.sleep):r["video_id"] for r in rows}; done=0
@@ -179,6 +211,17 @@ def main():
                 vid=fs[fut]; results.append({"video_id":vid,"url":f"https://www.youtube.com/watch?v={vid}","title":"","channel_name":"","status":"exception","error":repr(e)})
             done+=1
             if done%10==0 or done==len(rows): print(f"[captions] {done}/{len(rows)}",flush=True)
-    write_status(base,results); print(f"[done] {base/'caption_status.csv'}",flush=True); print(f"[queue] {base/'needs_transcription.csv'}",flush=True); return 0
+    write_status(base,results)
+    counts={}
+    for r in results:
+        counts[r.get("status","unknown")]=counts.get(r.get("status","unknown"),0)+1
+    manifest["completed_at"]=now()
+    manifest["status"]="complete"
+    manifest["result_counts"]=counts
+    manifest["output_files"]=["inventory.csv","inventory.jsonl","inventory_summary.json","caption_status.csv","needs_transcription.csv"]
+    (base/"run_manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(f"[done] {base/'caption_status.csv'}",flush=True)
+    print(f"[queue] {base/'needs_transcription.csv'}",flush=True)
+    return 0
 
 if __name__=="__main__": raise SystemExit(main())
