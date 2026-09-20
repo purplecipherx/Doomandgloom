@@ -65,7 +65,8 @@ if (Test-Path $ytPython) {
         "detect_investigative_motifs.py",
         "audio_identity_db.py",
         "audio_identity_selftest.py",
-        "spider_precision_selftest.py"
+        "spider_precision_selftest.py",
+        "build_voice_index_queue.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
@@ -80,6 +81,9 @@ if (Test-Path $ytPython) {
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
     & $ytPython (Join-Path $PSScriptRoot "audio_identity_selftest.py")
     & $ytPython (Join-Path $PSScriptRoot "spider_precision_selftest.py")
+    & $ytPython (Join-Path $PSScriptRoot "caption_voice_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Caption-to-speaker alignment regression self-test" } else { Fail "Caption-to-speaker alignment self-test failed" }
+
     if ($LASTEXITCODE -eq 0) { Pass "Spider high-precision candidate regression self-test" } else { Fail "Spider precision regression self-test failed" }
 
     if ($LASTEXITCODE -eq 0) { Pass "Voice identity acoustic/context fusion self-test" } else { Fail "Voice identity fusion self-test failed" }
