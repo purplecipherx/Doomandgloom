@@ -10,7 +10,8 @@ param(
     [int]$BatchSize = 4,
     [switch]$SkipPreflight,
     [switch]$DoNotStartServers,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$PreferExistingCaptions
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,9 +60,14 @@ foreach ($r in $selected) {
 Write-Host ""
 Write-Host "Policy:" -ForegroundColor Yellow
 Write-Host "  * Inventory ALL videos/shorts/streams (no video-count limit)"
-Write-Host "  * Existing captions remain preferred text when available"
-Write-Host "  * Captionless items -> 128 kbps audio -> Moji diarization -> WhisperX transcription"
-Write-Host "  * Captioned items -> 128 kbps audio -> Moji diarization/voice indexing -> caption speaker attribution"
+if ($PreferExistingCaptions) {
+    Write-Host "  * Good captions are reused as transcript text when available"
+    Write-Host "  * Captionless items -> 128 kbps audio -> Moji diarization -> WhisperX transcription"
+    Write-Host "  * Captioned items -> 128 kbps audio -> Moji diarization/voice indexing -> caption speaker attribution"
+} else {
+    Write-Host "  * EVERY harvested video -> 128 kbps audio -> Moji diarization/embedding/clustering -> WhisperX transcription"
+    Write-Host "  * Existing captions are still retained as independent text evidence, but are not used to skip Whisper"
+}
 Write-Host "  * No bulk source-video retention"
 Write-Host ""
 
@@ -112,6 +118,8 @@ $argsList = @(
     "--batch-size", "$BatchSize"
 )
 # No --limit-videos / --captionless-limit / --voice-index-limit: zero means unlimited.
+# Default for this special full-corpus launcher is literal full Whisper transcription.
+if (-not $PreferExistingCaptions) { $argsList += "--force-whisper-all" }
 if ($Force) { $argsList += "--force" }
 
 & $python @argsList
