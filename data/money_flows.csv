@@ -1,0 +1,1 @@
+money_id,payer_entity_id,payee_entity_id,product_or_program_id,relationship_type,amount,amount_min,amount_max,currency,frequency,gross_or_net,date_start,date_end,date_observed,source_type,source_url,archive_url,primary_source,source_ids,confidence,what_is_proven,what_is_not_proven,status,notes
