@@ -173,9 +173,16 @@ def main():
     ap=argparse.ArgumentParser(description="Inventory a YouTube channel and harvest existing captions without downloading media.")
     ap.add_argument("url"); ap.add_argument("--output",default="research/youtube"); ap.add_argument("--name",default="")
     ap.add_argument("--language-regex",default=r"en(?:[-_].*)?"); ap.add_argument("--inventory-only",action="store_true")
-    ap.add_argument("--workers",type=int,default=2); ap.add_argument("--sleep",type=float,default=0.75); ap.add_argument("--limit",type=int,default=0)
+    ap.add_argument("--workers",type=int,default=8); ap.add_argument("--sleep",type=float,default=0.75); ap.add_argument("--limit",type=int,default=0)
     a=ap.parse_args(); check_ytdlp()
-    rows=merge_inventory([inventory_one(t,u) for t,u in sources(a.url)])
+    srcs=sources(a.url)
+    if len(srcs)>1:
+        with ThreadPoolExecutor(max_workers=min(3,len(srcs))) as inv_ex:
+            inv_futs=[inv_ex.submit(inventory_one,t,u) for t,u in srcs]
+            inventory_groups=[f.result() for f in inv_futs]
+    else:
+        inventory_groups=[inventory_one(*srcs[0])]
+    rows=merge_inventory(inventory_groups)
     if a.limit>0: rows=rows[:a.limit]
     root,_=normalize_root(a.url); name=a.name.strip() or re.sub(r"[^A-Za-z0-9._-]+","_",root.rstrip("/").split("/")[-1] or "youtube")
     base=Path(a.output).expanduser().resolve()/name; write_inventory(base,rows,a.url)
