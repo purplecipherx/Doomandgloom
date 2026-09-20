@@ -18,12 +18,12 @@ $spiderRunner = Join-Path $PSScriptRoot "run_transcript_spider.ps1"
 
 if (-not (Test-Path $registryPath)) { throw "Missing registry: $registryPath" }
 
-$channels = Import-Csv $registryPath | Where-Object {
+$channels = @(Import-Csv $registryPath | Where-Object {
     $_.enabled -eq "true" -and $_.verification_status -eq "verified"
-}
+})
 
 if ($LimitChannels -gt 0) {
-    $channels = $channels | Select-Object -First $LimitChannels
+    $channels = @($channels | Select-Object -First $LimitChannels)
 }
 
 Write-Host ""
