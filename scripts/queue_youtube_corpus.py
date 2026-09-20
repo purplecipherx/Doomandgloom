@@ -20,6 +20,7 @@ def main():
     ap.add_argument("--limit-channels",type=int,default=0)
     ap.add_argument("--limit-videos",type=int,default=0)
     ap.add_argument("--captionless-limit",type=int,default=0)
+    ap.add_argument("--voice-index-limit",type=int,default=0)
     ap.add_argument("--caption-workers",type=int,default=8)
     ap.add_argument("--audio-workers",type=int,default=4)
     ap.add_argument("--sleep",type=float,default=0.75)
@@ -53,6 +54,7 @@ def main():
             "sleep":args.sleep,
             "limit_videos":args.limit_videos,
             "captionless_limit":args.captionless_limit,
+            "voice_index_limit":args.voice_index_limit,
             "device":args.device,
             "whisper_model":args.whisper_model,
             "compute_type":args.compute_type,
