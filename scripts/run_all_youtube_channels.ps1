@@ -5,6 +5,7 @@ param(
     [int]$Workers = 2,
     [int]$LimitChannels = 0,
     [int]$LimitVideos = 0,
+    [int]$CaptionlessLimit = 0,
     [switch]$SkipSpider
 )
 
@@ -51,6 +52,7 @@ foreach ($ch in $channels) {
     )
 
     if ($LimitVideos -gt 0) { $args += @("-Limit","$LimitVideos") }
+    if ($CaptionlessLimit -gt 0) { $args += @("-CaptionlessLimit","$CaptionlessLimit") }
     if ($Mode -eq "inventory") { $args += "-InventoryOnly" }
     if ($Mode -eq "full") { $args += "-ProcessCaptionless" }
 
