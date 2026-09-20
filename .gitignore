@@ -2,3 +2,16 @@
 research/youtube/**/audio_fallback/
 *.part
 *.ytdl
+**/__pycache__/
+*.pyc
+research/youtube/**/moji_work/**/*.wav
+research/youtube/**/moji_work/**/*.mp3
+research/youtube/**/moji_work/**/*.m4a
+research/youtube/**/moji_work/**/*.opus
+research/youtube/**/moji_work/**/*.flac
+research/youtube/**/moji_work/**/*.aac
+research/youtube/**/moji_work/**/*.ogg
+research/youtube/**/moji_work/**/*.webm
+research/youtube/**/moji_work/**/*.sqlite
+research/youtube/**/moji_work/**/*.sqlite-shm
+research/youtube/**/moji_work/**/*.sqlite-wal
