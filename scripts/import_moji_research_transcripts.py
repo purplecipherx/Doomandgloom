@@ -18,6 +18,18 @@ def load_audio_manifest(path: Path):
             by_stem[r["video_id"]] = r
     return by_stem
 
+def load_speaker_resolution(path: Path, channel_id: str):
+    out = {}
+    if not path or not path.exists():
+        return out
+    for r in csv.DictReader(path.open(encoding="utf-8-sig")):
+        if channel_id and r.get("channel_id") and r.get("channel_id") != channel_id:
+            continue
+        pid = r.get("pipeline_cluster_id") or ""
+        if pid:
+            out[pid] = r
+    return out
+
 def find_map(maps, t):
     for m in maps:
         if float(m["master_start"]) <= t <= float(m["master_end"]):
@@ -32,12 +44,15 @@ def main():
     ap.add_argument("--moji-output", required=True)
     ap.add_argument("--audio-manifest", required=True)
     ap.add_argument("--output", required=True)
+    ap.add_argument("--speaker-resolution", default="")
+    ap.add_argument("--channel-id", default="")
     args = ap.parse_args()
 
     moji = Path(args.moji_output).resolve()
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
     audio_meta = load_audio_manifest(Path(args.audio_manifest))
+    resolution = load_speaker_resolution(Path(args.speaker_resolution).resolve(), args.channel_id) if args.speaker_resolution else {}
 
     rows = []
     speakers_root = moji / "speakers"
@@ -83,13 +98,21 @@ def main():
                 if current:
                     rows.append(current)
                 meta = audio_meta.get(source.stem, {})
+                rr = resolution.get(speaker_id, {})
                 current = {
                     "_key": key,
+                    "channel_id": args.channel_id,
                     "video_id": meta.get("video_id", source.stem),
                     "canonical_url": meta.get("url", ""),
                     "title": meta.get("title", ""),
                     "speaker_id": speaker_id,
-                    "speaker_display_name": display_name,
+                    "raw_speaker_id": speaker_id,
+                    "acoustic_cluster_id": rr.get("cluster_observation_id", ""),
+                    "canonical_voice_id": rr.get("canonical_voice_id", ""),
+                    "resolved_entity_id": rr.get("resolved_entity_id", ""),
+                    "speaker_resolution_status": rr.get("binding_status", "") or rr.get("identity_status", ""),
+                    "speaker_resolution_confidence": rr.get("confidence", ""),
+                    "speaker_display_name": rr.get("display_name", "") or display_name,
                     "start_seconds": start,
                     "end_seconds": end,
                     "text": token,
@@ -103,7 +126,9 @@ def main():
 
     rows.sort(key=lambda r: (r["video_id"], r["start_seconds"], r["speaker_id"]))
     fields = [
-        "video_id","canonical_url","title","speaker_id","speaker_display_name",
+        "channel_id","video_id","canonical_url","title","speaker_id","raw_speaker_id",
+        "acoustic_cluster_id","canonical_voice_id","resolved_entity_id",
+        "speaker_resolution_status","speaker_resolution_confidence","speaker_display_name",
         "start_seconds","end_seconds","text","source_audio_path",
         "source_audio_sha256","moji_master_map","moji_transcript"
     ]
