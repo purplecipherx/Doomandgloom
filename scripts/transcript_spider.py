@@ -91,6 +91,82 @@ def classify(name, ctx):
     return "person_or_named_entity" if 2 <= len(name.split()) <= 5 else "named_entity"
 
 
+
+CONNECTOR_WORDS = {"of","the","and","for","de","del","van","von","la","le","&"}
+CONTRACTION_RE = re.compile(
+    r"^(?:i|we|you|they|he|she|it|that|what|there|here)[’']?(?:m|re|ve|d|ll|s|t)?$",
+    re.I,
+)
+
+def _candidate_tokens(name):
+    return [x for x in re.split(r"\s+", clean(name)) if x]
+
+def _token_is_proper(token):
+    t = token.strip("()[]{}\"'")
+    if not t:
+        return False
+    if t.lower() in CONNECTOR_WORDS:
+        return True
+    if t.isupper() and 2 <= len(t) <= 12:
+        return True
+    if re.fullmatch(r"[A-Z][A-Za-z0-9&’'-]*", t):
+        return True
+    return False
+
+def candidate_eligible(canonical, name, candidate_type, mentions, content_count, signals, prior_status=""):
+    """High-precision review queue gate. Raw mention evidence is never discarded."""
+    signals = set(signals or [])
+    status = (prior_status or "").strip().lower()
+    if canonical or status in {"approved", "existing", "accepted"}:
+        return True
+    if "url" in signals or candidate_type == "website":
+        return True
+
+    raw = clean(name)
+    if not raw or len(raw) < 3:
+        return False
+
+    # Proper-name regex must never bridge sentence punctuation. Strong cue rules
+    # are allowed to contain abbreviations such as "Dr." but plain proper_case is not.
+    if "proper_case" in signals and re.search(r"[.!?]", raw):
+        return False
+
+    words = _candidate_tokens(raw)
+    if not words:
+        return False
+
+    first = words[0].lower().strip(".,;:!?()[]{}\"'").replace("’", "'")
+    last = words[-1].lower().strip(".,;:!?()[]{}\"'").replace("’", "'")
+
+    if first in STOP or first in BAD_CUE_START or CONTRACTION_RE.fullmatch(first):
+        return False
+    if last in STOP or last in CUE_STOP or CONTRACTION_RE.fullmatch(last):
+        return False
+
+    # Strong typed/introduction cues are useful even when auto-captions lowercase names.
+    if any(sig.startswith("cue_person") for sig in signals):
+        return len(words) <= 5
+    if any(sig.startswith("cue_entity") for sig in signals):
+        return 1 <= len(words) <= 6
+
+    if "proper_case" not in signals:
+        return False
+
+    # One-token unknowns are retained only when repeated independently or acronym-like.
+    if len(words) == 1:
+        token = words[0]
+        if CONTRACTION_RE.fullmatch(token):
+            return False
+        acronym_like = token.isupper() and 2 <= len(token) <= 12
+        internal_cap = any(c.isupper() for c in token[1:])
+        repeated = int(content_count) >= 2
+        return acronym_like or internal_cap or repeated
+
+    # Multi-token proper names must actually have a proper-name shape.
+    if len(words) > 6:
+        return False
+    return all(_token_is_proper(w) for w in words)
+
 def triage(canonical, candidate_type, mentions, content_count, speaker_count, signals):
     signals = set(signals or [])
     score = 0
@@ -393,6 +469,11 @@ def rebuild_master(out: Path, old_master):
         content_count = len({x for x in s["contents"] if x})
         speaker_count = len(s["speakers"])
         score, priority = triage(canonical, s["candidate_type"], s["mentions"], content_count, speaker_count, s["signals"])
+        if not candidate_eligible(
+            canonical, s["display_name"], s["candidate_type"], s["mentions"],
+            content_count, s["signals"], old.get("review_status", "")
+        ):
+            continue
         rows.append({
             "candidate_key": key,
             "display_name": s["display_name"],
@@ -522,6 +603,7 @@ def main():
             "source_label": args.source_label,
         })
 
+    raw_candidate_count = len(agg)
     batch_rows = []
     for key, r in agg.items():
         content_count = len(r["contents"])
@@ -530,6 +612,11 @@ def main():
             r["canonical_entity_id"], r["candidate_type"], r["mentions"],
             content_count, speaker_count, r["signals"]
         )
+        if not candidate_eligible(
+            r["canonical_entity_id"], r["display_name"], r["candidate_type"],
+            r["mentions"], content_count, r["signals"]
+        ):
+            continue
         batch_rows.append({
             "candidate_key": key,
             "display_name": r["display_name"],
@@ -587,6 +674,7 @@ def main():
         "transcript_files_new": len(new_files),
         "transcript_files_skipped_already_processed": len(skipped),
         "segments_scanned": segment_count,
+        "raw_candidate_keys_this_batch": raw_candidate_count,
         "candidate_count_this_batch": len(batch_rows),
         "master_candidate_count": len(master_rows),
         "mention_evidence_rows": len(evidence),
@@ -599,7 +687,7 @@ def main():
     (run_dir / "spider_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(f"Spider batch {args.batch_id}: {len(new_files)} new transcript file(s), {len(skipped)} already processed")
-    print(f"Candidates this batch: {len(batch_rows)}; master queue: {len(master_rows)}")
+    print(f"Raw candidate keys: {raw_candidate_count}; review candidates: {len(batch_rows)}; master queue: {len(master_rows)}")
     print(out / "mention_candidates.csv")
     return 0
 
