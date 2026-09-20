@@ -150,7 +150,7 @@ def handle_job(job, *, repo: Path, hub: str, audio_workers: int):
                 enqueue(
                     hub,kind="prepare_audio_batch",lane="cpu",payload=bp,
                     job_key=f"audiobatch:{payload['channel_id']}:{payload['generation']}:{batch_id}",
-                    priority=5,max_attempts=3
+                    priority=8,max_attempts=3
                 )
                 queued+=1
             return {"exit_code":0,"audio_batches_queued":queued,"batch_size":batch_size,"video_count":len(rows)}
