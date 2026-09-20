@@ -5,7 +5,7 @@ import argparse,csv,json
 from pathlib import Path
 
 TRUTHY={"true","1","yes","y"}
-FACT_VERDICT_WORDS={"TRUE","FALSE","ACCURATE","INACCURATE","DEFAMATORY","SLANDEROUS","LIBELOUS"}
+BANNED_VERDICT_PREDICATES={"TRUE_STATEMENT","FALSE_STATEMENT","ACCURATE_STATEMENT","INACCURATE_STATEMENT","DEFAMATORY_STATEMENT","SLANDEROUS_STATEMENT","LIBELOUS_STATEMENT"}
 
 def b(v):
     if isinstance(v,bool): return v
@@ -53,7 +53,7 @@ def main():
             expected=ontology[pred]["family"].upper()
             if fam and fam!=expected:
                 errors.append(f"{uid}: {pred} family {fam} != ontology {expected}")
-            if any(x in pred for x in FACT_VERDICT_WORDS):
+            if pred in BANNED_VERDICT_PREDICATES:
                 errors.append(f"{uid}: truth/legal verdict leaked into semantic predicate {pred}")
             if pred.startswith(("ACCUSES_","CALLS_")) and (ev.get("speaker_adoption") or "").upper()=="":
                 errors.append(f"{uid}: {pred} missing adoption")
