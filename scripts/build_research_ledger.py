@@ -17,7 +17,7 @@ SPACE_RE = re.compile(r"\s+")
 FIELDS = [
     "unit_id","content_id","source_type","source_path","source_sha256",
     "start_seconds","end_seconds","speaker_id","text","unit_index",
-    "semantic_review_status","fact_check_status","created_at","last_seen_at"
+    "source_status","superseded_at","semantic_review_status","fact_check_status","created_at","last_seen_at"
 ]
 
 def now():
@@ -109,10 +109,14 @@ def main():
     source_count = 0
     raw_segment_count = 0
     new_count = 0
+    observed_source_versions = {}
+    current_unit_ids = set()
 
     for path, reader in transcript_files(research):
         source_count += 1
         digest = sha256_file(path)
+        resolved_path = str(path.resolve())
+        observed_source_versions[resolved_path] = digest
         for seg in reader(path):
             raw_segment_count += 1
             parts = split_sentences(seg["text"])
@@ -126,8 +130,11 @@ def main():
                     digest, seg["content_id"], start, end,
                     seg["speaker_id"], part, idx
                 )
+                current_unit_ids.add(uid)
                 if uid in units:
                     units[uid]["last_seen_at"] = observed_at
+                    units[uid]["source_status"] = "CURRENT"
+                    units[uid]["superseded_at"] = ""
                     continue
                 units[uid] = {
                     "unit_id": uid,
@@ -140,12 +147,28 @@ def main():
                     "speaker_id": seg["speaker_id"],
                     "text": part,
                     "unit_index": idx,
+                    "source_status": "CURRENT",
+                    "superseded_at": "",
                     "semantic_review_status": "PENDING",
                     "fact_check_status": "PENDING",
                     "created_at": observed_at,
                     "last_seen_at": observed_at,
                 }
                 new_count += 1
+
+    for uid, row in units.items():
+        source_path = row.get("source_path", "")
+        if source_path not in observed_source_versions:
+            continue
+        if uid in current_unit_ids:
+            continue
+        if row.get("source_sha256", "") != observed_source_versions[source_path]:
+            row["source_status"] = "SUPERSEDED"
+            if not row.get("superseded_at"):
+                row["superseded_at"] = observed_at
+        else:
+            row.setdefault("source_status", "CURRENT")
+            row.setdefault("superseded_at", "")
 
     def time_key(r):
         try:
@@ -168,7 +191,9 @@ def main():
         w = csv.DictWriter(f, fieldnames=qfields)
         w.writeheader()
         for r in rows:
-            if r.get("semantic_review_status") != "COMPLETE" or r.get("fact_check_status") != "COMPLETE":
+            if r.get("source_status","CURRENT") == "CURRENT" and (
+                r.get("semantic_review_status") != "COMPLETE" or r.get("fact_check_status") != "COMPLETE"
+            ):
                 w.writerow({k:r.get(k,"") for k in qfields})
 
     manifest = {
@@ -178,9 +203,13 @@ def main():
         "raw_transcript_segments": raw_segment_count,
         "unit_count": len(rows),
         "new_unit_count": new_count,
+        "current_unit_count": sum(1 for r in rows if r.get("source_status","CURRENT") == "CURRENT"),
+        "superseded_unit_count": sum(1 for r in rows if r.get("source_status","CURRENT") == "SUPERSEDED"),
         "pending_review_count": sum(
             1 for r in rows
-            if r.get("semantic_review_status") != "COMPLETE" or r.get("fact_check_status") != "COMPLETE"
+            if r.get("source_status","CURRENT") == "CURRENT" and (
+                r.get("semantic_review_status") != "COMPLETE" or r.get("fact_check_status") != "COMPLETE"
+            )
         ),
         "policy": "Every transcript unit is preserved and queued; semantic extraction/fact checking attaches by stable unit_id."
     }
