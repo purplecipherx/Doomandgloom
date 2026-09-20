@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -92,6 +93,9 @@ def detect_moji_root(explicit=""):
         if (p/"voice_harvest.py").exists(): return p
     raise RuntimeError("Could not find M0J1M0J1 voice_harvest.py")
 
+def stage(log, name):
+    print(f"\n--- STAGE {name} @ {now()} ---", flush=True)
+
 def load_moji(moji_root:Path):
     root=str(moji_root)
     if root not in sys.path: sys.path.insert(0,root)
@@ -127,20 +131,26 @@ def handle(job,repo:Path,hub:str,moji_root:Path,moji_funcs):
         print(f"Resident Moji root: {moji_root}")
         print(f"GPU memory before: {json.dumps(gpu_memory())}")
 
+        stage(log,"scan")
         cmd_scan(Namespace(output=str(moji_out),force=False,input=str(audio_dir),hash="sha256"))
+        stage(log,"diarize")
         cmd_diarize(Namespace(output=str(moji_out),force=False,hf_token=None,device=p.get("device","cuda")))
+        stage(log,"embed")
         cmd_embed(Namespace(
             output=str(moji_out),force=False,embed_device="cpu",
             embedding_model=p.get("embedding_model","hbredin/wespeaker-voxceleb-resnet34-LM"),
             embedding_segments=int(p.get("embedding_segments",20))
         ))
+        stage(log,"cluster")
         cmd_cluster(Namespace(output=str(moji_out),force=False,threshold=float(p.get("cluster_threshold",0.68))))
 
         if not voice_only:
+            stage(log,"extract")
             cmd_extract(Namespace(
                 output=str(moji_out),force=False,sample_rate=int(p.get("sample_rate",44100)),
                 gap_ms=int(p.get("gap_ms",350)),min_segment=float(p.get("min_segment",0.8))
             ))
+            stage(log,"transcribe")
             cmd_transcribe(Namespace(
                 output=str(moji_out),force=False,whisper_model=p.get("whisper_model","medium.en"),
                 language=p.get("language","en"),device=p.get("device","cuda"),
@@ -203,6 +213,16 @@ def main():
                 result=handle(job,repo,args.hub,moji_root,moji_funcs)
                 complete(args.hub,job_id=job["id"],worker=worker,result=result); ok=True
             except Exception as e:
+                try:
+                    logs=repo/"research"/"runtime"/"logs"
+                    lp=logs/f"job_{job['id']}_gpu_moji.log"
+                    lp.parent.mkdir(parents=True,exist_ok=True)
+                    with lp.open("a",encoding="utf-8",errors="replace") as log:
+                        log.write("\n--- GPU JOB EXCEPTION ---\n")
+                        log.write(traceback.format_exc())
+                        log.write("\n")
+                except Exception:
+                    pass
                 try: fail(args.hub,job_id=job["id"],worker=worker,error=repr(e),retry_delay=120)
                 except Exception: pass
             finally:
