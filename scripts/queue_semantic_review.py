@@ -106,7 +106,19 @@ def main():
                 "context_after":[ctx(x) for x in content_rows[idx+1:idx+3]],
             }
 
-    pending=[r for r in current_rows if r.get("semantic_review_status")!="COMPLETE" and r["unit_id"] not in index]
+    deferred_unattributed = [
+        r for r in current_rows
+        if r.get("source_type")=="youtube_caption"
+        and not attribution_for(r,caption_attribution)
+        and r.get("semantic_review_status")!="COMPLETE"
+        and r["unit_id"] not in index
+    ]
+    pending=[
+        r for r in current_rows
+        if r.get("semantic_review_status")!="COMPLETE"
+        and r["unit_id"] not in index
+        and (r.get("source_type")!="youtube_caption" or attribution_for(r,caption_attribution))
+    ]
 
     new_index=[]
     created=[]
@@ -175,7 +187,8 @@ def main():
         for r in sorted(index.values(),key=lambda x:(x["batch_id"],x["unit_id"])): w.writerow(r)
 
     manifest={"created_at":now(),"ledger":str(ledger),"new_batches":created,"new_units":len(new_index),
-              "total_indexed_units":len(index),"hub":args.hub or None}
+              "total_indexed_units":len(index),"deferred_unattributed_caption_units":len(deferred_unattributed),
+              "hub":args.hub or None}
     (out/"review_queue_manifest.json").write_text(json.dumps(manifest,indent=2),encoding="utf-8")
     print(json.dumps(manifest,indent=2))
     return 0
