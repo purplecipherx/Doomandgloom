@@ -60,11 +60,16 @@ if (Test-Path $ytPython) {
         "queue_semantic_review.py",
         "apply_semantic_review.py",
         "apply_fact_checks.py",
-        "pipeline_selftest.py"
+        "pipeline_selftest.py",
+        "build_dynamic_graph.py",
+        "detect_investigative_motifs.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
     if ($LASTEXITCODE -eq 0) { Pass "Python scripts compile cleanly" } else { Fail "Python syntax compilation failed" }
+
+    & $ytPython -c "import networkx as nx; print('networkx=' + nx.__version__)"
+    if ($LASTEXITCODE -eq 0) { Pass "NetworkX graph analysis dependency available" } else { Fail "NetworkX missing; rerun scripts\setup_youtube_harvester.ps1" }
 
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
     if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
