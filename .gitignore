@@ -1,6 +1,4 @@
 .venv-youtube/
-research/youtube/**/metadata/
-research/youtube/**/captions/
-research/youtube/**/normalized/
-research/youtube/**/results/
 research/youtube/**/audio_fallback/
+*.part
+*.ytdl
