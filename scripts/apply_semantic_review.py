@@ -146,7 +146,10 @@ def main():
             if predicate not in ontology:
                 raise SystemExit(f"Unknown semantic predicate {predicate} in unit {uid}")
             ontology_row=ontology[predicate]
-            source_entity_id=ev.get("source_entity_id") or r.get("speaker_entity_id","") or u.get("resolved_entity_id","")
+            reporting_entity_id=r.get("speaker_entity_id","") or u.get("resolved_entity_id","")
+            reporting_voice_id=u.get("canonical_voice_id","")
+            source_entity_id=ev.get("source_entity_id") or reporting_entity_id
+            actor_resolution_status=(ev.get("actor_resolution_status") or ("RESOLVED" if source_entity_id else "UNRESOLVED")).upper()
             target_entity_id=ev.get("target_entity_id","")
             target_surface=norm(ev.get("target_surface") or "")
             target_claim_id=ev.get("target_claim_id","")
@@ -162,7 +165,9 @@ def main():
                 "unit_id":uid,"content_id":u["content_id"],
                 "start_seconds":u.get("start_seconds",""),"end_seconds":u.get("end_seconds",""),
                 "speaker_id":u.get("speaker_id",""),"canonical_voice_id":u.get("canonical_voice_id",""),
+                "reporting_entity_id":reporting_entity_id,"reporting_voice_id":reporting_voice_id,
                 "source_entity_id":source_entity_id,"source_surface":norm(ev.get("source_surface") or ""),
+                "actor_resolution_status":actor_resolution_status,
                 "predicate_code":predicate,"predicate_family":ontology_row.get("family","").upper(),
                 "raw_predicate":raw_predicate,
                 "target_entity_id":target_entity_id,"target_surface":target_surface,"target_claim_id":target_claim_id,
@@ -312,7 +317,8 @@ def main():
 
     write_csv(ad/"semantic_events.csv",semantic_events,[
         "semantic_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id","canonical_voice_id",
-        "source_entity_id","source_surface","predicate_code","predicate_family","raw_predicate",
+        "reporting_entity_id","reporting_voice_id","source_entity_id","source_surface","actor_resolution_status",
+        "predicate_code","predicate_family","raw_predicate",
         "target_entity_id","target_surface","target_claim_id","related_claim_refs_json","related_claim_ids_json",
         "object_entity_id","object_surface","topic",
         "polarity","speaker_adoption","attribution_mode","certainty","explicitness","negated","conditional",
