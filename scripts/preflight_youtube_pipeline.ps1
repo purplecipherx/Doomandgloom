@@ -63,7 +63,8 @@ if (Test-Path $ytPython) {
         "pipeline_selftest.py",
         "build_dynamic_graph.py",
         "detect_investigative_motifs.py",
-        "audio_identity_db.py"
+        "audio_identity_db.py",
+        "audio_identity_selftest.py"
     ) | ForEach-Object { Join-Path $PSScriptRoot $_ }
 
     & $ytPython -m py_compile @pyFiles
@@ -76,6 +77,9 @@ if (Test-Path $ytPython) {
     if ($LASTEXITCODE -eq 0) { Pass "NetworkX graph analysis dependency available" } else { Fail "NetworkX missing; rerun scripts\setup_youtube_harvester.ps1" }
 
     & $ytPython (Join-Path $PSScriptRoot "pipeline_selftest.py")
+    & $ytPython (Join-Path $PSScriptRoot "audio_identity_selftest.py")
+    if ($LASTEXITCODE -eq 0) { Pass "Voice identity acoustic/context fusion self-test" } else { Fail "Voice identity fusion self-test failed" }
+
     if ($LASTEXITCODE -eq 0) { Pass "Durable job hub enqueue/lease/heartbeat/complete self-test" } else { Fail "Durable job hub runtime self-test failed" }
 
     & $ytPython -m yt_dlp --version
