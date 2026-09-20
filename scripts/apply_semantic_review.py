@@ -74,6 +74,7 @@ def main():
         r.setdefault("atomic_claims",[])
         r.setdefault("relationships",[])
         r.setdefault("stances",[])
+        r.setdefault("speaker_identity_clues",[])
         r.setdefault("products",[])
         r.setdefault("predictions",[])
         r.setdefault("money_or_conflict_signals",[])
@@ -85,7 +86,7 @@ def main():
     write_jsonl(reviews_path,ordered)
 
     fact_checks=load_jsonl_map(ad/"fact_checks.jsonl","claim_id")
-    claims=[]; mentions=[]; relationships=[]; stances=[]; products=[]; predictions=[]; money=[]; citations=[]
+    claims=[]; mentions=[]; relationships=[]; stances=[]; identity_clues=[]; products=[]; predictions=[]; money=[]; citations=[]
 
     for uid,r in reviews.items():
         u=unit_map[uid]
@@ -125,6 +126,37 @@ def main():
                 "subject_entity_id":rel.get("subject_entity_id",""),"object_entity_id":rel.get("object_entity_id",""),
                 "relationship_type":rel.get("relationship_type",""),"description":desc,
                 "confidence":rel.get("confidence",""),"source_path":u["source_path"]
+            })
+
+        for clue in r.get("speaker_identity_clues") or []:
+            target_cluster=clue.get("target_acoustic_cluster_id") or u.get("acoustic_cluster_id","")
+            target_raw=clue.get("target_raw_speaker_id") or u.get("raw_speaker_id","") or u.get("speaker_id","")
+            claimed_entity_id=clue.get("claimed_entity_id","")
+            claimed_name=norm(clue.get("claimed_name") or "")
+            evidence_type=(clue.get("evidence_type") or "").upper()
+            evidence_text=norm(clue.get("evidence_text") or clue.get("text") or "")
+            if not (target_cluster or target_raw):
+                continue
+            if not (claimed_entity_id or claimed_name):
+                continue
+            identity_clues.append({
+                "identity_clue_id":clue.get("identity_clue_id") or sid(
+                    "IC_",uid,target_cluster,target_raw,claimed_entity_id,claimed_name,evidence_type,evidence_text
+                ),
+                "unit_id":uid,
+                "content_id":u["content_id"],
+                "channel_id":u.get("channel_id",""),
+                "target_acoustic_cluster_id":target_cluster,
+                "target_raw_speaker_id":target_raw,
+                "current_canonical_voice_id":u.get("canonical_voice_id",""),
+                "current_resolved_entity_id":u.get("resolved_entity_id",""),
+                "claimed_entity_id":claimed_entity_id,
+                "claimed_name":claimed_name,
+                "evidence_type":evidence_type,
+                "evidence_text":evidence_text,
+                "confidence":clue.get("confidence",""),
+                "speaker_adoption":(clue.get("speaker_adoption") or "ADOPTS").upper(),
+                "source_path":u["source_path"],
             })
 
         for st in r.get("stances") or []:
@@ -201,6 +233,12 @@ def main():
         "relationship_claim_id","unit_id","content_id","speaker_id","subject_entity_id","object_entity_id",
         "relationship_type","description","confidence","source_path"
     ])
+    write_csv(ad/"speaker_identity_clues.csv",identity_clues,[
+        "identity_clue_id","unit_id","content_id","channel_id","target_acoustic_cluster_id",
+        "target_raw_speaker_id","current_canonical_voice_id","current_resolved_entity_id",
+        "claimed_entity_id","claimed_name","evidence_type","evidence_text","confidence",
+        "speaker_adoption","source_path"
+    ])
     write_csv(ad/"stance_events.csv",stances,[
         "stance_event_id","unit_id","content_id","start_seconds","end_seconds","speaker_id",
         "source_entity_id","target_entity_id","target_claim_id","stance_type","topic","excerpt",
@@ -255,7 +293,7 @@ def main():
     print(json.dumps({
         "accepted_reviews":accepted,"total_reviews":len(reviews),"claims":len(claims),
         "fact_checks_pending":len(unresolved),"mentions":len(mentions),"relationships":len(relationships),
-        "stances":len(stances),"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
+        "stances":len(stances),"speaker_identity_clues":len(identity_clues),"products":len(products),"predictions":len(predictions),"money_conflict_signals":len(money)
     },indent=2))
     return 0
 
